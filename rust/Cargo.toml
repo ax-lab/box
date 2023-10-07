@@ -3,6 +3,7 @@
 # default-members = [ "bit" ]
 
 members = [
+	"arena",
 	"bit",
 	"hello",
 ]
