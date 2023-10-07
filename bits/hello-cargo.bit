@@ -1,0 +1,4 @@
+# Rust code execution using cargo
+
+use rust.cargo
+cargo.run('rust/hello')

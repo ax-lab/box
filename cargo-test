@@ -1,0 +1,3 @@
+#! /bin/bash
+
+cargo test --manifest-path rust/Cargo.toml "${@:2}"

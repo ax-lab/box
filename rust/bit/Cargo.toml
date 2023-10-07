@@ -1,0 +1,12 @@
+[package]
+
+name = "bit"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+default-run = "bit"
+
+[[bin]]
+name = "bit"
+path = "bit.rs"
