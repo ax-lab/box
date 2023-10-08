@@ -16,7 +16,7 @@ fn run() -> Result<()> {
 		if let Some(path) = src.path() {
 			print!(" at {}", path.to_string_lossy());
 		}
-		println!();
+		println!("\n");
 		println!("{}■\n", src.text());
 	}
 

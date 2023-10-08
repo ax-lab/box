@@ -3,10 +3,10 @@
 # default-members = [ "bit" ]
 
 members = [
-	"arena",
 	"bit",
 	"hello",
-	"input",
-	"result",
-	"symbols",
+	"libs/arena",
+	"libs/input",
+	"libs/result",
+	"libs/symbols",
 ]
