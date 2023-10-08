@@ -1,17 +1,14 @@
 [package]
 
-name = "bit"
+name = "input"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
-default-run = "bit"
-
-[[bin]]
-name = "bit"
-path = "bit.rs"
+[lib]
+name = "input"
+path = "input.rs"
 
 [dependencies]
 
-input = { path = "../input" }
 result = { path = "../result" }
