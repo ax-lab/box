@@ -6,4 +6,5 @@ members = [
 	"arena",
 	"bit",
 	"hello",
+	"symbols",
 ]
