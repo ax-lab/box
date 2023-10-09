@@ -7,6 +7,6 @@ members = [
 	"hello",
 	"libs/arena",
 	"libs/input",
+	"libs/names",
 	"libs/result",
-	"libs/symbols",
 ]

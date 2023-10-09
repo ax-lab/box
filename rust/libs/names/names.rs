@@ -7,9 +7,9 @@ use std::{
 
 /// Symbols are interned strings representing a name or symbol in the program.
 #[derive(Copy, Clone)]
-pub struct Symbol(&'static str);
+pub struct Name(&'static str);
 
-impl Symbol {
+impl Name {
 	pub fn from_str<T: AsRef<str>>(str: T) -> Self {
 		static MAP: OnceLock<RwLock<HashMap<&'static str, &'static str>>> = OnceLock::new();
 		let map = MAP.get_or_init(|| Default::default());
@@ -19,7 +19,7 @@ impl Symbol {
 		{
 			let map = map.read().unwrap();
 			if let Some(symbol) = map.get(key) {
-				return Symbol(symbol);
+				return Name(symbol);
 			}
 		}
 
@@ -27,7 +27,7 @@ impl Symbol {
 
 		// the entry may have been added between the read and the write locks
 		if let Some(symbol) = map.get(key) {
-			return Symbol(symbol);
+			return Name(symbol);
 		}
 
 		let symbol = Box::new(key.to_string());
@@ -41,33 +41,33 @@ impl Symbol {
 	}
 }
 
-impl<T: AsRef<str>> From<T> for Symbol {
+impl<T: AsRef<str>> From<T> for Name {
 	fn from(value: T) -> Self {
-		Symbol::from_str(value)
+		Name::from_str(value)
 	}
 }
 
-impl Eq for Symbol {}
+impl Eq for Name {}
 
-impl PartialEq for Symbol {
+impl PartialEq for Name {
 	fn eq(&self, other: &Self) -> bool {
 		self.0.as_ptr() == other.0.as_ptr()
 	}
 }
 
-impl Hash for Symbol {
+impl Hash for Name {
 	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
 		self.0.as_ptr().hash(state);
 	}
 }
 
-impl Display for Symbol {
+impl Display for Name {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		write!(f, "{}", self.as_str())
 	}
 }
 
-impl Debug for Symbol {
+impl Debug for Name {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		write!(f, "#{:?}", self.as_str())
 	}
@@ -75,16 +75,16 @@ impl Debug for Symbol {
 
 #[cfg(test)]
 mod tests {
-	use crate::Symbol;
+	use crate::Name;
 
 	#[test]
-	pub fn basic_symbols() {
-		let a1 = Symbol::from_str("a");
-		let a2 = Symbol::from_str("a");
-		let b1 = Symbol::from_str("b");
-		let b2 = Symbol::from_str("b");
-		let c1 = Symbol::from_str("c");
-		let c2 = Symbol::from_str("c");
+	pub fn basic_names() {
+		let a1 = Name::from_str("a");
+		let a2 = Name::from_str("a");
+		let b1 = Name::from_str("b");
+		let b2 = Name::from_str("b");
+		let c1 = Name::from_str("c");
+		let c2 = Name::from_str("c");
 
 		assert_eq!(a1, a2);
 		assert_eq!(b1, b2);
