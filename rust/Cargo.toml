@@ -10,5 +10,6 @@ members = [
 	"libs/arena",
 	"libs/input",
 	"libs/names",
+	"libs/nodes",
 	"libs/result",
 ]
