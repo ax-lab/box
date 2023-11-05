@@ -68,14 +68,36 @@
 */
 
 pub mod result;
+pub mod str;
+
+use result::*;
+use str::*;
 
 use std::{
 	collections::HashMap,
 	fmt::{Debug, Display, Formatter},
+	marker::PhantomData,
 	sync::Arc,
 };
 
-use result::*;
+#[derive(Default)]
+pub struct Store {
+	str: StrData,
+}
+
+impl Store {
+	pub fn new() -> Self {
+		Self::default()
+	}
+}
+
+pub struct Node {}
+
+pub enum Key {}
+
+//====================================================================================================================//
+// Other
+//====================================================================================================================//
 
 pub trait Operator: Debug {
 	fn apply(&self, program: &mut Program) -> Result<bool>;
