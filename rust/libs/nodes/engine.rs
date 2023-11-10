@@ -49,7 +49,7 @@ pub trait NodeModel: Sized {
 }
 
 pub trait IsNode<T: NodeModel> {
-	fn key(&self) -> &T::Key;
+	fn key(&self) -> T::Key;
 	fn span(&self) -> &Span;
 }
 
@@ -80,6 +80,10 @@ impl<T: NodeModel> Segment<T> {
 
 	pub fn nodes(&self) -> &[T::Node] {
 		&self.data.nodes
+	}
+
+	pub fn into_nodes(self) -> Vec<T::Node> {
+		self.data.nodes
 	}
 }
 
@@ -574,6 +578,8 @@ impl<T> Default for Arena<T> {
 
 #[cfg(test)]
 mod tests {
+	use std::sync::{Arc, OnceLock};
+
 	use super::*;
 
 	#[test]
@@ -815,13 +821,191 @@ mod tests {
 	}
 
 	impl IsNode<Test> for Test {
-		fn key(&self) -> &<Test as NodeModel>::Key {
-			&self.0
+		fn key(&self) -> <Test as NodeModel>::Key {
+			self.0
 		}
 
 		fn span(&self) -> &Span {
 			&self.2
 		}
+	}
+
+	#[test]
+	fn text_node() {
+		const INPUT: &'static str = "00011110022995999";
+
+		let len = INPUT.len();
+		let mut engine = Engine::new();
+		engine.set(ALL, TextKey::Input, (), -1);
+		engine.add_node(TextNode::Input(INPUT, Span { src: 0, off: 0, len }));
+
+		let output = process(engine);
+		assert_eq!(
+			output,
+			[
+				('0', 3, Span { src: 0, off: 0, len: 3 }),
+				('0', 2, Span { src: 0, off: 7, len: 2 }),
+				('1', 4, Span { src: 0, off: 3, len: 4 }),
+				('2', 2, Span { src: 0, off: 9, len: 2 }),
+				(
+					'5',
+					1,
+					Span {
+						src: 0,
+						off: 13,
+						len: 1
+					}
+				),
+				(
+					'9',
+					2,
+					Span {
+						src: 0,
+						off: 11,
+						len: 2
+					}
+				),
+				(
+					'9',
+					3,
+					Span {
+						src: 0,
+						off: 14,
+						len: 3
+					}
+				),
+			]
+		);
+	}
+
+	#[test]
+	fn text_node_big() {
+		static STR: OnceLock<String> = OnceLock::new();
+		let str = STR.get_or_init(|| {
+			let mut str = String::new();
+			for _ in 0..1000 {
+				str.push_str("000111335599969988877334446622226666");
+			}
+			str
+		});
+
+		let mut engine = Engine::new();
+		engine.set(ALL, TextKey::Input, (), -1);
+		engine.add_node(TextNode::Input(
+			&str,
+			Span {
+				src: 0,
+				off: 0,
+				len: str.len(),
+			},
+		));
+
+		let output = process(engine);
+		assert!(output.len() > 0)
+	}
+
+	enum TextNode {
+		Input(&'static str, Span),
+		Char(char, Span),
+		Run(char, usize, Span),
+	}
+
+	#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+	enum TextKey {
+		Input,
+		Char(char),
+		Run(char),
+	}
+
+	impl NodeModel for TextNode {
+		type Key = TextKey;
+
+		type Val = ();
+
+		type Ord = i32;
+
+		type Node = Self;
+	}
+
+	impl IsNode<TextNode> for TextNode {
+		fn key(&self) -> <TextNode as NodeModel>::Key {
+			match self {
+				TextNode::Input(..) => TextKey::Input,
+				TextNode::Char(chr, ..) => TextKey::Char(*chr),
+				TextNode::Run(chr, ..) => TextKey::Run(*chr),
+			}
+		}
+
+		fn span(&self) -> &Span {
+			match self {
+				TextNode::Input(.., span) => span,
+				TextNode::Char(.., span) => span,
+				TextNode::Run(.., span) => span,
+			}
+		}
+	}
+
+	const ALL: Span = Span {
+		src: 0,
+		off: 0,
+		len: usize::MAX,
+	};
+
+	fn process(mut engine: Engine<TextNode>) -> Vec<(char, usize, Span)> {
+		let mut output = Vec::new();
+		while let Some(next) = engine.shift() {
+			match next.key() {
+				TextKey::Input => {
+					for node in next.nodes() {
+						if let TextNode::Input(text, span) = node {
+							let src = span.src;
+							let mut off = span.off;
+							for chr in text.chars() {
+								let len = chr.len_utf8();
+								let span = Span { src, off, len };
+								engine.set(span, TextKey::Run(chr), (), 999999 + chr as i32);
+								engine.add_node(TextNode::Char(chr, span));
+								engine.set(ALL, TextKey::Char(chr), (), chr as i32);
+								off += len;
+							}
+						}
+					}
+				}
+				TextKey::Char(chr) => {
+					let mut cur = usize::MAX;
+					let mut off = cur;
+					let mut src = 0;
+					let mut cnt = 0;
+					let push = |engine: &mut Engine<TextNode>, cnt: usize, src: usize, off: usize, len: usize| {
+						if cnt > 0 {
+							engine.add_node(TextNode::Run(*chr, cnt, Span { src, off, len }));
+						}
+					};
+					for node in next.nodes() {
+						let span = node.span();
+						if span.off == cur && span.src == src {
+							cur += span.len;
+							cnt += 1;
+						} else {
+							push(&mut engine, cnt, src, off, cur - off);
+							cnt = 1;
+							src = span.src;
+							off = span.off;
+							cur = span.off + span.len;
+						}
+					}
+					push(&mut engine, cnt, src, off, cur - off);
+				}
+				TextKey::Run(..) => {
+					for node in next.into_nodes() {
+						if let TextNode::Run(chr, cnt, span) = node {
+							output.push((chr, cnt, span));
+						}
+					}
+				}
+			}
+		}
+		output
 	}
 
 	#[test]
