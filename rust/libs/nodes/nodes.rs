@@ -76,7 +76,7 @@ pub enum Key<'a> {
 #[derive(Debug)]
 pub enum Expr<'a> {
 	Const(Value<'a>),
-	Print(Vec<Expr<'a>>),
+	Print(Vec<Node<'a>>),
 }
 
 impl<'a> Expr<'a> {

@@ -16,7 +16,7 @@ fn compile<'a>(expr: &Expr<'a>) -> Result<Code<'a>> {
 	let code = match expr {
 		Expr::Const(value) => Code::Const(value.clone()),
 		Expr::Print(args) => {
-			let args = args.iter().map(|x| compile(x)).collect::<Result<_>>()?;
+			let args = args.iter().map(|x| compile(x.expr())).collect::<Result<_>>()?;
 			Code::Print(args)
 		}
 		expr => Err(format!("expression cannot be compiled: {expr:?}"))?,

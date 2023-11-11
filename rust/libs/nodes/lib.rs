@@ -851,8 +851,11 @@ mod tests {
 
 		let m1 = Expr::Const(Value::Str(m1));
 		let m2 = Expr::Const(Value::Str(m2));
-		let print = Expr::Print(vec![m1, m2]); // TODO: this should be a node
-		program.new_node(print, Span { src: 0, off: 0, len: 1 });
+
+		let m1 = program.new_node(m1, Span { src: 0, off: 0, len: 1 });
+		let m2 = program.new_node(m2, Span { src: 0, off: 1, len: 2 });
+		let print = Expr::Print(vec![m1, m2]);
+		program.new_node(print, Span { src: 0, off: 0, len: 2 });
 		program.resolve()?;
 
 		let mut rt = Runtime::new(&store);
