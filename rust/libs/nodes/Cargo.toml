@@ -7,6 +7,6 @@ publish = false
 
 [lib]
 name = "nodes"
-path = "nodes.rs"
+path = "lib.rs"
 
 [dependencies]

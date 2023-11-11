@@ -50,7 +50,7 @@ pub trait NodeModel: Sized {
 
 pub trait IsNode<T: NodeModel> {
 	fn key(&self) -> T::Key;
-	fn span(&self) -> &Span;
+	fn span(&self) -> Span;
 }
 
 pub struct Segment<T: NodeModel> {
@@ -133,6 +133,23 @@ impl<T: NodeModel> Engine<T> {
 		self.queue
 			.first()
 			.map(|x| unsafe { std::mem::transmute(&((**x).data)) })
+	}
+
+	pub fn get_unbound(&self) -> Option<Vec<(T::Key, Vec<&T::Node>)>> {
+		let mut output = Vec::new();
+		for (k, v) in self.table.iter() {
+			let list = v.unbound.iter().flat_map(|x| x).collect::<Vec<_>>();
+			if list.len() > 0 {
+				output.push((k.clone(), list));
+			}
+		}
+
+		if output.len() > 0 {
+			output.sort_by(|a, b| a.0.cmp(&b.0));
+			Some(output)
+		} else {
+			None
+		}
 	}
 
 	pub fn shift(&mut self) -> Option<Segment<T>> {
@@ -825,8 +842,8 @@ mod tests {
 			self.0
 		}
 
-		fn span(&self) -> &Span {
-			&self.2
+		fn span(&self) -> Span {
+			self.2
 		}
 	}
 
@@ -936,11 +953,11 @@ mod tests {
 			}
 		}
 
-		fn span(&self) -> &Span {
+		fn span(&self) -> Span {
 			match self {
-				TextNode::Input(.., span) => span,
-				TextNode::Char(.., span) => span,
-				TextNode::Run(.., span) => span,
+				TextNode::Input(.., span) => *span,
+				TextNode::Char(.., span) => *span,
+				TextNode::Run(.., span) => *span,
 			}
 		}
 	}
