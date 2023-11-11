@@ -3,7 +3,7 @@ use super::*;
 
 impl<'a> NodeModel for Node<'a> {
 	type Key = Key<'a>;
-	type Val = Arc<dyn Operator<'a>>;
+	type Val = &'a dyn Operator<'a>;
 	type Ord = Precedence;
 	type Node = Self;
 }
@@ -68,44 +68,48 @@ struct NodeData<'a> {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum Key<'a> {
 	None,
-	Const,
-	Print,
-	Symbol(Str<'a>),
+	Let,
+	Var(Str<'a>),
 }
 
 #[derive(Debug)]
 pub enum Expr<'a> {
+	Seq(Vec<Node<'a>>),
 	Const(Value<'a>),
+	Let(Str<'a>, Node<'a>),
+	RefInit(&'a op::LetDecl<'a>),
+	Ref(&'a op::LetDecl<'a>),
+	Var(Str<'a>),
+	OpAdd(Node<'a>, Node<'a>),
+	OpMul(Node<'a>, Node<'a>),
 	Print(Vec<Node<'a>>),
 }
 
 impl<'a> Expr<'a> {
 	pub fn key(&self) -> Key<'a> {
 		match self {
-			Expr::Const(..) => Key::Const,
-			Expr::Print(..) => Key::Print,
+			Expr::Let(..) => Key::Let,
+			Expr::Var(s) => Key::Var(*s),
+			Expr::RefInit(..) => Key::None,
+			Expr::Ref(..) => Key::None,
+			Expr::Seq(..) => Key::None,
+			Expr::Const(..) => Key::None,
+			Expr::Print(..) => Key::None,
+			Expr::OpAdd(..) => Key::None,
+			Expr::OpMul(..) => Key::None,
 		}
 	}
 }
 
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub struct Type<'a> {
-	data: *const TypeData<'a>,
-}
-
-struct TypeData<'a> {
-	name: Str<'a>,
-}
-
-impl<'a> Type<'a> {
-	fn data(&self) -> &TypeData<'a> {
-		unsafe { &*self.data }
+impl<'a> Program<'a> {
+	pub fn set_node(&mut self, node: Node<'a>, expr: Expr<'a>) {
+		self.pending_writes.push((node, expr));
 	}
-}
 
-impl<'a> Debug for Type<'a> {
-	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-		let name = self.data().name;
-		write!(f, "{name}")
+	pub fn process_writes(&mut self) {
+		for (node, expr) in std::mem::take(&mut self.pending_writes) {
+			let data = unsafe { &mut *(node.data as *mut NodeData<'a>) };
+			data.expr = expr;
+		}
 	}
 }

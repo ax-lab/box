@@ -359,7 +359,7 @@ impl<T: NodeModel> KeyTable<T> {
 		}
 
 		if let Some(unbound) = self.unbound.get_mut(src) {
-			let node_sta = unbound.partition_point(|x| x.span().offset_end() <= sta);
+			let node_sta = unbound.partition_point(|x| x.span().end() <= sta);
 			let node_end = unbound[node_sta..].partition_point(|x| x.span().off < end) + node_sta;
 			let mut seg_index = insert_idx;
 			for node in unbound.drain(node_sta..node_end) {

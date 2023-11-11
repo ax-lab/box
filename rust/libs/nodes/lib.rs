@@ -68,6 +68,7 @@
 */
 
 pub mod arena;
+pub mod builder;
 pub mod code;
 pub mod engine;
 pub mod nodes;
@@ -75,13 +76,16 @@ pub mod op;
 pub mod result;
 pub mod span;
 pub mod str;
+pub mod values;
 
 use arena::*;
+use builder::*;
 use code::*;
 use nodes::*;
 use result::*;
 use span::*;
 use str::*;
+use values::*;
 
 use std::{
 	collections::HashMap,
@@ -112,18 +116,24 @@ pub trait Operator<'a> {
 
 pub struct Program<'a> {
 	store: &'a Store,
-	output: Vec<Code<'a>>,
+	output_code: Vec<Node<'a>>,
 	engine: engine::Engine<Node<'a>>,
+	pending_writes: Vec<(Node<'a>, Expr<'a>)>,
 }
 
 impl<'a> Program<'a> {
 	pub fn new(store: &'a Store) -> Self {
 		let program = Self {
 			store,
-			output: Default::default(),
+			output_code: Default::default(),
 			engine: engine::Engine::new(),
+			pending_writes: Default::default(),
 		};
 		program
+	}
+
+	pub fn store<T>(&self, value: T) -> &'a mut T {
+		self.store.add(value)
 	}
 
 	pub fn new_node(&mut self, expr: Expr<'a>, span: Span) -> Node<'a> {
@@ -134,39 +144,44 @@ impl<'a> Program<'a> {
 		node
 	}
 
-	pub fn bind(&mut self, key: Key<'a>, span: Span, op: Arc<dyn Operator<'a>>, prec: Precedence) {
+	pub fn output(&mut self, code: Node<'a>) {
+		self.output_code.push(code);
+	}
+
+	pub fn bind<T: Operator<'a> + 'a>(&mut self, key: Key<'a>, span: Span, op: T, prec: Precedence) {
+		let op = self.store.add(op);
 		self.engine.set(span, key, op, prec);
 	}
 
 	pub fn resolve(&mut self) -> Result<()> {
 		while let Some(next) = self.engine.shift() {
-			let op = next.value().clone();
+			let op = *next.value();
 			let key = *next.key();
 			let range = *next.range();
 			let nodes = next.into_nodes();
 			op.execute(self, key, nodes, range)?;
+			self.process_writes();
 		}
 
 		Ok(())
 	}
 
-	pub fn output(&mut self, code: Code<'a>) {
-		self.output.push(code);
-	}
-
 	pub fn compile(&self) -> Result<Vec<Code<'a>>> {
 		self.check_unbound(|s| eprint!("{s}"))?;
-		let code = self.output.clone();
+		let mut code = Vec::new();
+		for it in self.output_code.iter() {
+			let it = it.expr().compile()?;
+			code.push(it);
+		}
 		Ok(code)
 	}
 
 	pub fn run(&self, rt: &mut Runtime<'a>) -> Result<Value<'a>> {
-		self.check_unbound(|s| eprint!("{s}"))?;
+		let code = self.compile()?;
 		let mut value = Value::Unit;
-		for it in self.output.iter() {
-			value = rt.execute(it)?;
+		for it in code {
+			value = rt.execute(&it)?;
 		}
-
 		Ok(value)
 	}
 
@@ -846,16 +861,76 @@ mod tests {
 		let expected_value = Value::Tuple(vec![Value::Str(m1), Value::Str(m2)]);
 
 		let mut program = Program::new(&store);
-		program.bind(Key::Const, ALL, Arc::new(op::CompileExpr), 0);
-		program.bind(Key::Print, ALL, Arc::new(op::CompileExpr), 1);
-
 		let m1 = Expr::Const(Value::Str(m1));
 		let m2 = Expr::Const(Value::Str(m2));
 
 		let m1 = program.new_node(m1, Span { src: 0, off: 0, len: 1 });
 		let m2 = program.new_node(m2, Span { src: 0, off: 1, len: 2 });
 		let print = Expr::Print(vec![m1, m2]);
-		program.new_node(print, Span { src: 0, off: 0, len: 2 });
+		let print = program.new_node(print, Span { src: 0, off: 0, len: 2 });
+		program.output(print);
+		program.resolve()?;
+
+		let mut rt = Runtime::new(&store);
+		let val = program.run(&mut rt)?;
+
+		assert_eq!(val, expected_value);
+		assert_eq!(rt.get_output(), expected_output);
+
+		Ok(())
+	}
+
+	#[test]
+	fn answer() -> Result<()> {
+		let expected_output = "The answer to life, the universe, and everything is 42\n";
+		let expected_value = Value::Int(42);
+
+		let store = Store::new();
+		let mut program = Program::new(&store);
+		program.bind(Key::Let, ALL, op::Decl(1), 0);
+
+		let s = store.str("The answer to life, the universe, and everything is");
+		let s = Value::Str(s);
+		let a = Value::Int(10);
+		let b = Value::Int(4);
+		let c = Value::Int(2);
+
+		let s = program.op_const(s, Span { src: 0, off: 0, len: 1 });
+		let a = program.op_const(a, Span { src: 0, off: 1, len: 1 });
+		let b = program.op_const(b, Span { src: 0, off: 2, len: 1 });
+		let c = program.op_const(c, Span { src: 0, off: 3, len: 1 });
+
+		program.decl("s", s, s.span());
+		program.decl("a", a, a.span());
+		program.decl("b", b, b.span());
+		program.decl("c", c, c.span());
+
+		let s = program.var("s", Span { src: 0, off: 4, len: 1 });
+		let a = program.var("a", Span { src: 0, off: 5, len: 1 });
+		let b = program.var("b", Span { src: 0, off: 6, len: 1 });
+		let c = program.var("c", Span { src: 0, off: 7, len: 1 });
+
+		let ans = program.op_mul(a, b);
+		let ans = program.op_add(ans, c);
+		program.decl("ans", ans, ans.span());
+
+		let print = Expr::Print(vec![
+			program.var("s", Span { src: 0, off: 8, len: 1 }),
+			program.var("ans", Span { src: 0, off: 9, len: 1 }),
+		]);
+
+		let p0 = program.new_node(print, Span { src: 0, off: 8, len: 2 });
+		let p1 = program.var(
+			"ans",
+			Span {
+				src: 0,
+				off: 10,
+				len: 1,
+			},
+		);
+
+		let seq = program.seq([p0, p1]);
+		program.output(seq);
 		program.resolve()?;
 
 		let mut rt = Runtime::new(&store);

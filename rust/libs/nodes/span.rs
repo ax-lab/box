@@ -27,7 +27,7 @@ impl Debug for Range {
 	}
 }
 
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Default, Eq, PartialEq)]
 pub struct Span {
 	pub src: usize,
 	pub off: usize,
@@ -35,7 +35,7 @@ pub struct Span {
 }
 
 impl Span {
-	pub fn offset_end(&self) -> usize {
+	pub fn end(&self) -> usize {
 		self.off + self.len
 	}
 

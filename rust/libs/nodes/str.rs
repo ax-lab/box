@@ -15,6 +15,13 @@ pub struct Str<'a> {
 }
 
 impl<'a> Str<'a> {
+	pub const fn empty() -> Self {
+		Self {
+			data: "",
+			tag: PhantomData,
+		}
+	}
+
 	pub fn as_str(&self) -> &'a str {
 		// safety: data is immutable and valid for the store's lifetime 'a
 		unsafe { &*self.data }
@@ -73,6 +80,10 @@ pub(crate) struct StrData {
 impl Store {
 	pub fn str<T: AsRef<str>>(&self, str: T) -> Str {
 		let str = str.as_ref();
+		if str.len() == 0 {
+			return Str::empty();
+		}
+
 		let tag = PhantomData;
 
 		// fast path for existing strings
@@ -124,6 +135,9 @@ mod tests {
 		assert_eq!(b1, b2);
 		assert_eq!(b1, b3);
 		assert_eq!(b2, b3);
+
+		assert_eq!(a1, Str::empty());
+		assert_eq!(a2, Str::empty());
 
 		assert!(a1 != b1);
 
