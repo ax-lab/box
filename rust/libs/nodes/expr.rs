@@ -38,8 +38,13 @@ impl<'a> Expr<'a> {
 impl<'a> Expr<'a> {
 	pub fn compile(&self) -> Result<Code<'a>> {
 		let code = match self {
-			Expr::Seq(code) => {
-				todo!()
+			Expr::Seq(list) => {
+				let mut output = Vec::new();
+				for it in list.nodes() {
+					let code = it.expr().compile()?;
+					output.push(code);
+				}
+				Code::Seq(output)
 			}
 			Expr::Const(value) => Code::Const(value.clone()),
 			Expr::OpAdd(lhs, rhs) => {
