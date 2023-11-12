@@ -4,7 +4,7 @@ impl<'a> Program<'a> {
 	pub fn decl<T: AsRef<str>>(&mut self, name: T, expr: Node<'a>, span: Span) -> Node<'a> {
 		let name = self.store.str(name);
 		let node = self.new_node(Expr::Let(name, expr), span);
-		self.output(node);
+		self.output([node]);
 		node
 	}
 
@@ -13,14 +13,10 @@ impl<'a> Program<'a> {
 		self.new_node(Expr::Var(name), span)
 	}
 
-	pub fn seq<T: IntoIterator<Item = Node<'a>>>(&mut self, code: T) -> Node<'a> {
-		let mut code = code.into_iter();
-		let seq = code.collect::<Vec<_>>();
-		let span = Self::span_from_to(
-			seq.first().map(|x| x.span()).unwrap_or_default(),
-			seq.last().map(|x| x.span()).unwrap_or_default(),
-		);
-		self.new_node(Expr::Seq(seq), span)
+	pub fn seq<T: IntoIterator<Item = Node<'a>>>(&mut self, nodes: T) -> Node<'a> {
+		let list = self.new_list(nodes);
+		let span = list.span();
+		self.new_node(Expr::Seq(list), span)
 	}
 
 	pub fn op_const(&mut self, value: Value<'a>, span: Span) -> Node<'a> {

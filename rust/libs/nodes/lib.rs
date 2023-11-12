@@ -71,21 +71,25 @@ pub mod arena;
 pub mod builder;
 pub mod code;
 pub mod engine;
+pub mod expr;
 pub mod nodes;
 pub mod op;
+pub mod program;
 pub mod result;
 pub mod span;
 pub mod str;
 pub mod values;
 
-use arena::*;
-use builder::*;
-use code::*;
-use nodes::*;
-use result::*;
-use span::*;
-use str::*;
-use values::*;
+pub use arena::*;
+pub use builder::*;
+pub use code::*;
+pub use expr::*;
+pub use nodes::*;
+pub use program::*;
+pub use result::*;
+pub use span::*;
+pub use str::*;
+pub use values::*;
 
 use std::{
 	collections::HashMap,
@@ -108,6 +112,11 @@ impl Store {
 	pub fn add<T>(&self, value: T) -> &mut T {
 		self.arena.store(value)
 	}
+
+	pub fn add_items<T, I: IntoIterator<Item = T>>(&self, items: I) -> &mut [T] {
+		let slice = self.arena.store_vec(&mut items.into_iter().collect());
+		slice
+	}
 }
 
 pub trait Operator<'a> {
@@ -118,88 +127,7 @@ pub struct Program<'a> {
 	store: &'a Store,
 	output_code: Vec<Node<'a>>,
 	engine: engine::Engine<Node<'a>>,
-	pending_writes: Vec<(Node<'a>, Expr<'a>)>,
-}
-
-impl<'a> Program<'a> {
-	pub fn new(store: &'a Store) -> Self {
-		let program = Self {
-			store,
-			output_code: Default::default(),
-			engine: engine::Engine::new(),
-			pending_writes: Default::default(),
-		};
-		program
-	}
-
-	pub fn store<T>(&self, value: T) -> &'a mut T {
-		self.store.add(value)
-	}
-
-	pub fn new_node(&mut self, expr: Expr<'a>, span: Span) -> Node<'a> {
-		let node = self.store.alloc_node(expr, span);
-		if node.key() != Key::None {
-			self.engine.add_node(node);
-		}
-		node
-	}
-
-	pub fn output(&mut self, code: Node<'a>) {
-		self.output_code.push(code);
-	}
-
-	pub fn bind<T: Operator<'a> + 'a>(&mut self, key: Key<'a>, span: Span, op: T, prec: Precedence) {
-		let op = self.store.add(op);
-		self.engine.set(span, key, op, prec);
-	}
-
-	pub fn resolve(&mut self) -> Result<()> {
-		while let Some(next) = self.engine.shift() {
-			let op = *next.value();
-			let key = *next.key();
-			let range = *next.range();
-			let nodes = next.into_nodes();
-			op.execute(self, key, nodes, range)?;
-			self.process_writes();
-		}
-
-		Ok(())
-	}
-
-	pub fn compile(&self) -> Result<Vec<Code<'a>>> {
-		self.check_unbound(|s| eprint!("{s}"))?;
-		let mut code = Vec::new();
-		for it in self.output_code.iter() {
-			let it = it.expr().compile()?;
-			code.push(it);
-		}
-		Ok(code)
-	}
-
-	pub fn run(&self, rt: &mut Runtime<'a>) -> Result<Value<'a>> {
-		let code = self.compile()?;
-		let mut value = Value::Unit;
-		for it in code {
-			value = rt.execute(&it)?;
-		}
-		Ok(value)
-	}
-
-	fn check_unbound<T: FnMut(&str)>(&self, mut output_error: T) -> Result<()> {
-		if let Some(unbound) = self.engine.get_unbound() {
-			output_error("\nThe following nodes have not been resolved:\n");
-			for (key, nodes) in unbound {
-				output_error(&format!("\n=> {key:?}:\n\n"));
-				for node in nodes {
-					output_error(&format!("- {node:?}\n"));
-				}
-			}
-			output_error("\n");
-
-			Err("compiling program: some nodes were not resolved")?;
-		}
-		Ok(())
-	}
+	pending: PendingWrites<'a>,
 }
 
 //====================================================================================================================//
@@ -868,7 +796,7 @@ mod tests {
 		let m2 = program.new_node(m2, Span { src: 0, off: 1, len: 2 });
 		let print = Expr::Print(vec![m1, m2]);
 		let print = program.new_node(print, Span { src: 0, off: 0, len: 2 });
-		program.output(print);
+		program.output([print]);
 		program.resolve()?;
 
 		let mut rt = Runtime::new(&store);
@@ -905,6 +833,8 @@ mod tests {
 		program.decl("b", b, b.span());
 		program.decl("c", c, c.span());
 
+		// TODO: add proper typing
+
 		let s = program.var("s", Span { src: 0, off: 4, len: 1 });
 		let a = program.var("a", Span { src: 0, off: 5, len: 1 });
 		let b = program.var("b", Span { src: 0, off: 6, len: 1 });
@@ -929,9 +859,28 @@ mod tests {
 			},
 		);
 
-		let seq = program.seq([p0, p1]);
-		program.output(seq);
+		program.output([p0, p1]);
 		program.resolve()?;
+
+		let mut rt = Runtime::new(&store);
+		let val = program.run(&mut rt)?;
+
+		assert_eq!(val, expected_value);
+		assert_eq!(rt.get_output(), expected_output);
+
+		Ok(())
+	}
+
+	#[test]
+	#[cfg(no)]
+	fn foreach() -> Result<()> {
+		let expected_output = vec!["Item 1", "Item 2", "Item 3", "Item 4", ""].join("\n");
+		let expected_value = Value::Unit;
+
+		let store = Store::new();
+		let mut program = Program::new(&store);
+
+		// ID(foreach) ID(it) ID(in) NUM(1) ".." NUM(5) ":" ID(print) STR("Item") VAR(it)
 
 		let mut rt = Runtime::new(&store);
 		let val = program.run(&mut rt)?;
@@ -962,5 +911,91 @@ mod tests {
 		assert_eq!(res, ValueEx::Unit);
 		assert_eq!(out, expected);
 		Ok(())
+	}
+
+	#[test]
+	fn line_breaks() -> Result<()> {
+		let store = Store::new();
+		let mut program = Program::new(&store);
+
+		let mut b = Builder::new(&mut program);
+
+		let line = b.str("line");
+
+		let a1 = b.node(Expr::Id(line));
+		let a2 = b.node(Expr::Num(1));
+		let a3 = b.node(Expr::LBreak);
+
+		let b1 = b.node(Expr::Id(line));
+		let b2 = b.node(Expr::Num(2));
+		let b3 = b.node(Expr::LBreak);
+
+		let c1 = b.node(Expr::Id(line));
+		let c2 = b.node(Expr::Num(3));
+		let c3 = b.node(Expr::LBreak);
+
+		b.output([a1, a2, a3, b1, b2, b3, c1, c2, c3]);
+
+		b.bind_all(Key::LBreak, op::SplitAt, 0);
+		b.done();
+
+		program.resolve()?;
+
+		let output = program
+			.get_output()
+			.iter()
+			.map(|x| format!("{}", x.expr()))
+			.collect::<Vec<_>>();
+
+		assert_eq!(
+			output,
+			["[ Id(line) Num(1) ]", "[ Id(line) Num(2) ]", "[ Id(line) Num(3) ]"]
+		);
+
+		Ok(())
+	}
+
+	struct Builder<'a, 'b> {
+		program: &'b mut Program<'a>,
+		offset: usize,
+	}
+
+	impl<'a, 'b> Builder<'a, 'b> {
+		pub fn new(program: &'b mut Program<'a>) -> Self {
+			Self { program, offset: 0 }
+		}
+
+		pub fn bind_all<T: Operator<'a> + 'a>(&mut self, key: Key<'a>, op: T, prec: Precedence) {
+			let span = Span {
+				src: 0,
+				off: 0,
+				len: usize::MAX,
+			};
+			self.program.bind(key, span, op, prec);
+		}
+
+		pub fn str<T: AsRef<str>>(&self, str: T) -> Str<'a> {
+			self.program.str(str)
+		}
+
+		pub fn node(&mut self, expr: Expr<'a>) -> Node<'a> {
+			let span = Span {
+				src: 0,
+				off: self.offset,
+				len: 1,
+			};
+			self.offset += 1;
+			self.program.new_node(expr, span)
+		}
+
+		pub fn seq<T: IntoIterator<Item = Node<'a>>>(&mut self, nodes: T) -> Node<'a> {
+			self.program.seq(nodes)
+		}
+
+		pub fn output<T: IntoIterator<Item = Node<'a>>>(&mut self, nodes: T) {
+			self.program.output(nodes);
+		}
+
+		pub fn done(self) {}
 	}
 }

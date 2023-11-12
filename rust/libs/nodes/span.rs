@@ -56,6 +56,21 @@ impl Span {
 			b1 >= a1 && b1 < a2 && b2 <= a2
 		}
 	}
+
+	pub fn range(from: Span, to: Span) -> Span {
+		assert!(from.src == to.src);
+		assert!(from.off < to.off);
+		assert!(from.off + from.len < to.off + to.len);
+
+		let src = from.src;
+		let off = from.off;
+		let end = to.off + to.len;
+		Span {
+			src,
+			off,
+			len: end - off,
+		}
+	}
 }
 
 impl Ord for Span {

@@ -12,7 +12,7 @@ pub struct StoreArena {
 	next: AtomicPtr<u8>,
 	data: AtomicPtr<u8>,
 	free: Mutex<Vec<(*mut u8, Layout)>>,
-	drop: Mutex<Vec<(*mut u8, fn(*mut u8))>>,
+	drop: Mutex<Vec<(*mut u8, usize, usize, fn(*mut u8, usize, usize))>>,
 }
 
 impl StoreArena {
@@ -32,6 +32,31 @@ impl StoreArena {
 		out
 	}
 
+	pub fn store_vec<'a, T>(&'a self, value: &mut Vec<T>) -> &'a mut [T] {
+		let len = value.len();
+		if len == 0 {
+			return &mut [];
+		}
+
+		let align = std::mem::align_of::<T>();
+		let size = std::mem::size_of::<T>() * value.len();
+		let buffer = self.alloc(size, align);
+
+		let mut vec = unsafe { std::mem::ManuallyDrop::new(Vec::from_raw_parts(buffer as *mut T, 0, len)) };
+		vec.extend(value.drain(..));
+
+		if std::mem::needs_drop::<T>() {
+			self.on_drop(buffer, len, 0, |ptr, len, _| unsafe {
+				let items = std::slice::from_raw_parts_mut(ptr as *mut T, len);
+				for it in items {
+					std::ptr::drop_in_place(it);
+				}
+			});
+		}
+
+		unsafe { std::slice::from_raw_parts_mut(buffer as *mut T, len) }
+	}
+
 	pub fn store<T>(&self, value: T) -> &mut T {
 		let align = std::mem::align_of::<T>();
 		let size = std::mem::size_of::<T>();
@@ -41,7 +66,7 @@ impl StoreArena {
 		unsafe {
 			data.write(value);
 			if std::mem::needs_drop::<T>() {
-				self.on_drop(ptr, |ptr| {
+				self.on_drop(ptr, 0, 0, |ptr, _, _| {
 					let data = ptr as *mut T;
 					data.drop_in_place();
 				});
@@ -50,9 +75,9 @@ impl StoreArena {
 		}
 	}
 
-	pub fn on_drop(&self, ptr: *mut u8, drop_fn: fn(*mut u8)) {
+	pub fn on_drop(&self, ptr: *mut u8, len: usize, cap: usize, drop_fn: fn(*mut u8, usize, usize)) {
 		let mut drop = self.drop.lock().unwrap();
-		drop.push((ptr, drop_fn));
+		drop.push((ptr, len, cap, drop_fn));
 	}
 
 	pub fn alloc(&self, size: usize, align: usize) -> *mut u8 {
@@ -130,8 +155,8 @@ impl Drop for StoreArena {
 		};
 
 		// drop values in reverse order of allocation
-		for (ptr, drop_fn) in drop.into_iter().rev() {
-			drop_fn(ptr);
+		for (ptr, len, cap, drop_fn) in drop.into_iter().rev() {
+			drop_fn(ptr, len, cap);
 		}
 
 		// free raw memory
@@ -226,6 +251,34 @@ mod tests {
 		assert_eq!(*counter.read().unwrap(), count);
 		drop(arena);
 		assert_eq!(*counter.read().unwrap(), 0);
+	}
+
+	#[test]
+	fn store_slice() {
+		let counter: Arc<RwLock<usize>> = Default::default();
+
+		let arena = StoreArena::with_page_size(17);
+		let count = 10000;
+		let get_counter = || *counter.read().unwrap();
+
+		let mut source_items = Vec::new();
+		for i in 0..count {
+			source_items.push((i * 10, DropCounter::new(counter.clone())));
+		}
+
+		assert_eq!(get_counter(), count);
+
+		let items = arena.store_vec(&mut source_items);
+		assert_eq!(source_items.len(), 0);
+		assert_eq!(items.len(), count);
+		assert_eq!(get_counter(), count);
+
+		for (i, (it, _)) in items.iter().enumerate() {
+			assert_eq!(it, &(i * 10));
+		}
+
+		drop(arena);
+		assert_eq!(get_counter(), 0);
 	}
 
 	#[derive(Debug)]

@@ -27,6 +27,7 @@ impl<'a> Operator<'a> for Decl {
 	}
 }
 
+#[derive(Eq, PartialEq)]
 pub struct LetDecl<'a> {
 	name: Str<'a>,
 	node: Node<'a>,
@@ -68,5 +69,94 @@ impl<'a> Operator<'a> for BindVar<'a> {
 		}
 
 		Ok(())
+	}
+}
+
+pub struct SplitAt;
+
+impl<'a> Operator<'a> for SplitAt {
+	fn execute(&self, program: &mut Program<'a>, key: Key<'a>, nodes: Vec<Node<'a>>, range: Range) -> Result<()> {
+		let nodes = split_by_list(nodes);
+		if let Some(unbound) = nodes.unbound() {
+			Err(format!("split operator called on non-seq nodes: {unbound:?}"))?
+		}
+
+		for (list, nodes) in nodes.iter() {
+			let mut new_nodes = Vec::new();
+			let mut cur = 0;
+			for node in nodes {
+				let idx = node.index();
+				if idx > cur {
+					let list = program.split_list(list, cur..idx);
+					let line = program.new_node(Expr::Seq(list), list.span());
+					new_nodes.push(line);
+				}
+				cur = idx + 1;
+			}
+
+			if cur < list.len() {
+				let list = program.split_list(list, cur..);
+				let line = program.new_node(Expr::Seq(list), list.span());
+				new_nodes.push(line);
+			}
+
+			program.replace_list(list, new_nodes);
+		}
+		Ok(())
+	}
+}
+
+fn split_by_list<'a>(nodes: Vec<Node<'a>>) -> NodesByList<'a> {
+	let mut sorted_nodes = nodes;
+	sorted_nodes.sort_by(|a, b| {
+		a.parent()
+			.is_some()
+			.cmp(&b.parent().is_some())
+			.reverse()
+			.then_with(|| a.id().cmp(&b.id()))
+	});
+	NodesByList { sorted_nodes }
+}
+
+struct NodesByList<'a> {
+	sorted_nodes: Vec<Node<'a>>,
+}
+
+impl<'a> NodesByList<'a> {
+	pub fn unbound(&self) -> Option<&[Node<'a>]> {
+		let index = self.sorted_nodes.partition_point(|x| x.parent().is_some());
+		let nodes = &self.sorted_nodes[index..];
+		if nodes.len() > 0 {
+			Some(nodes)
+		} else {
+			None
+		}
+	}
+
+	pub fn iter<'b>(&'b self) -> NodesByListIter<'a, 'b> {
+		NodesByListIter { list: self, next: 0 }
+	}
+}
+
+struct NodesByListIter<'a, 'b> {
+	list: &'b NodesByList<'a>,
+	next: usize,
+}
+
+impl<'a, 'b> Iterator for NodesByListIter<'a, 'b> {
+	type Item = (NodeList<'a>, &'b [Node<'a>]);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let nodes = &self.list.sorted_nodes;
+		if self.next >= nodes.len() {
+			None
+		} else if let Some(parent) = nodes[self.next].parent() {
+			let sta = self.next;
+			let len = nodes[self.next..].partition_point(|x| x.parent() == Some(parent));
+			self.next += len;
+			Some((parent, &nodes[sta..sta + len]))
+		} else {
+			None
+		}
 	}
 }
