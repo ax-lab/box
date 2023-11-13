@@ -118,7 +118,87 @@ pub struct ForEach;
 
 impl<'a> Operator<'a> for ForEach {
 	fn execute(&self, program: &mut Program<'a>, key: Key<'a>, nodes: Vec<Node<'a>>, range: Range) -> Result<()> {
-		todo!()
+		for it in nodes {
+			let list = if let Some(list) = it.parent() {
+				list
+			} else {
+				continue;
+			};
+
+			let (var, var_node) = if let Some(var) = it.next() {
+				if let Expr::Id(name) = var.expr() {
+					(*name, var)
+				} else {
+					Err(format!("foreach: expected variable name, got {var:?}"))?
+				}
+			} else {
+				Err(format!("foreach: expected variable name {it:?}"))?
+			};
+
+			let has_in = if let Some(Expr::Id(kw)) = var_node.next().map(|x| x.expr()) {
+				kw.as_str() == "in"
+			} else {
+				false
+			};
+			if !has_in {
+				Err(format!("foreach: expected `in`"))?;
+			}
+
+			let nodes = list.nodes();
+			let sta = it.index();
+
+			let expr_sta = sta + 3;
+			let mut expr_end = expr_sta;
+			while expr_end < nodes.len() {
+				if let Expr::Op(sym) = nodes[expr_end].expr() {
+					if sym.as_str() == ":" {
+						break;
+					}
+				}
+				expr_end += 1;
+			}
+
+			if expr_end >= nodes.len() {
+				Err(format!("foreach: expected `:`"))?;
+			}
+
+			program.set_done(nodes[1]);
+			program.set_done(nodes[2]);
+			program.set_done(nodes[expr_end]);
+
+			program.remove_nodes(list, sta..);
+
+			let expr = program.slice_to_list(&nodes[expr_sta..expr_end]);
+			let body = program.slice_to_list(&nodes[expr_end + 1..]);
+			if expr.len() == 0 {
+				Err(format!("foreach: empty expression"))?;
+			}
+			if body.len() == 0 {
+				Err(format!("foreach: empty body"))?;
+			}
+
+			let span = Span::range(it.span(), nodes[expr_end].span());
+			let foreach = Expr::ForEach { var, expr, body };
+			let foreach = program.new_node(foreach, span);
+
+			let var_decl = LetDecl {
+				name: var,
+				node: var_node,
+				init: false.into(),
+			};
+			let var_decl = program.store(var_decl);
+
+			let binding = body.span();
+			let binding_len = usize::MAX - binding.off;
+			let binding = Span {
+				len: binding_len,
+				..binding
+			};
+			program.bind(Key::Id(var), binding, BindVar(var_decl), -1);
+
+			program.splice_list(list, sta.., [foreach]);
+		}
+		Ok(())
 	}
 }
 
@@ -148,16 +228,18 @@ impl<'a> Operator<'a> for MakeRange {
 				Err(format!("expected range end {it:?}"))?
 			};
 
-			let next = program.new_list([next]);
-			let prev = program.new_list([prev]);
-
 			let sta = it.index() - 1;
 			let end = it.index() + 2;
+
+			program.remove_nodes(list, sta..end);
+
+			let next = program.new_list([next]);
+			let prev = program.new_list([prev]);
 
 			let span = Span::range(prev.span(), next.span());
 			let range = Expr::Range(prev, next);
 			let range = program.new_node(range, span);
-			program.splice_list(list, sta..end, [range]);
+			program.splice_list(list, sta..sta, [range]);
 		}
 		Ok(())
 	}

@@ -18,6 +18,11 @@ pub enum Expr<'a> {
 	Num(i32),
 	Str(Str<'a>),
 	Range(NodeList<'a>, NodeList<'a>),
+	ForEach {
+		var: Str<'a>,
+		expr: NodeList<'a>,
+		body: NodeList<'a>,
+	},
 	Seq(NodeList<'a>),
 	Const(Value<'a>),
 	Let(Str<'a>, Node<'a>),
@@ -99,8 +104,12 @@ impl<'a> Node<'a> {
 impl<'a> Display for Expr<'a> {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
 		match self {
-			Expr::Id(id) => write!(f, "Id({id})"),
+			Expr::Num(val) => write!(f, "{val}"),
+			Expr::Str(val) => write!(f, "{val:?}"),
+			Expr::Id(id) => write!(f, "`{id}`"),
 			Expr::Seq(seq) => write!(f, "{seq}"),
+			Expr::Range(a, b) => write!(f, "Range({a}..{b})"),
+			Expr::ForEach { var, expr, body } => write!(f, "ForEach({var} in {expr}) => {body}"),
 			_ => write!(f, "{self:?}"),
 		}
 	}

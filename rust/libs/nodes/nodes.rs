@@ -109,6 +109,7 @@ impl Store {
 	pub(crate) fn alloc_node<'a>(&'a self, expr: Expr<'a>, span: Span) -> Node<'a> {
 		let expr = self.arena.store(expr);
 		let data = self.arena.store(NodeData {
+			done: Cell::new(false),
 			expr: Cell::new(expr),
 			expr_span: span,
 			list: Default::default(),
@@ -122,6 +123,10 @@ impl<'a> Node<'a> {
 	/// Non-zero unique identifier for this node.
 	pub fn id(&self) -> usize {
 		self.data as *const _ as usize
+	}
+
+	pub fn is_done(&self) -> bool {
+		self.data.done.get()
 	}
 
 	pub fn parent(&self) -> Option<NodeList<'a>> {
@@ -247,6 +252,7 @@ struct NodeListData<'a> {
 }
 
 struct NodeData<'a> {
+	done: Cell<bool>,
 	expr: Cell<&'a Expr<'a>>,
 	expr_span: Span,
 	list: Cell<Option<NodeList<'a>>>,
@@ -280,6 +286,12 @@ impl<'a> Program<'a> {
 		let data = node.data();
 		let expr = self.store.add(expr);
 		data.expr.set(expr);
+		data.done.set(false);
+	}
+
+	pub fn set_done(&mut self, node: Node<'a>) {
+		let data = node.data();
+		data.done.set(true);
 	}
 
 	pub fn split_list<R: RangeBounds<usize>>(&mut self, source: NodeList<'a>, range: R) -> NodeList<'a> {

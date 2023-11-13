@@ -47,8 +47,10 @@ impl<'a> Program<'a> {
 			let key = *next.key();
 			let range = *next.range();
 			let nodes = next.into_nodes();
-
-			op.execute(self, key, nodes, range)?;
+			let nodes = nodes.into_iter().filter(|x| !x.is_done()).collect::<Vec<_>>();
+			if nodes.len() > 0 {
+				op.execute(self, key, nodes, range)?;
+			}
 		}
 
 		self.output_code = self.remove_nodes(list, ..).to_vec();
@@ -76,8 +78,17 @@ impl<'a> Program<'a> {
 
 	fn check_unbound<T: FnMut(&str)>(&self, mut output_error: T) -> Result<()> {
 		if let Some(unbound) = self.engine.get_unbound() {
-			output_error("\nThe following nodes have not been resolved:\n");
+			let mut has_error = false;
 			for (key, nodes) in unbound {
+				let nodes = nodes.into_iter().filter(|x| !x.is_done()).collect::<Vec<_>>();
+				if nodes.len() == 0 {
+					continue;
+				}
+
+				if !has_error {
+					output_error("\nThe following nodes have not been resolved:\n");
+					has_error = true;
+				}
 				output_error(&format!("\n=> {key:?}:\n\n"));
 				for node in nodes {
 					output_error(&format!("- {node:?}\n"));
