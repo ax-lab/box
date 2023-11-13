@@ -59,8 +59,8 @@ impl Span {
 
 	pub fn range(from: Span, to: Span) -> Span {
 		assert!(from.src == to.src);
-		assert!(from.off < to.off);
-		assert!(from.off + from.len < to.off + to.len);
+		assert!(from.off <= to.off);
+		assert!(from.off + from.len <= to.off + to.len);
 
 		let src = from.src;
 		let off = from.off;

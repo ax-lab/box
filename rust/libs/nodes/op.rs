@@ -43,8 +43,8 @@ impl<'a> LetDecl<'a> {
 		self.name
 	}
 
-	pub fn expr(&self) -> &Expr<'a> {
-		self.node.expr()
+	pub fn node(&self) -> Node<'a> {
+		self.node
 	}
 
 	pub fn set_init(&self) {
@@ -72,6 +72,7 @@ impl<'a> Operator<'a> for BindVar<'a> {
 	}
 }
 
+/// Split a NodeList at the bound nodes.
 pub struct SplitAt;
 
 impl<'a> Operator<'a> for SplitAt {
@@ -81,30 +82,90 @@ impl<'a> Operator<'a> for SplitAt {
 			Err(format!("split operator called on non-seq nodes: {unbound:?}"))?
 		}
 
-		for (list, nodes) in nodes.iter() {
+		for (src, nodes) in nodes.iter() {
 			let mut new_nodes = Vec::new();
 			let mut cur = 0;
 			for node in nodes {
 				let idx = node.index();
 				if idx > cur {
-					let list = program.split_list(list, cur..idx);
-					let line = program.new_node(Expr::Seq(list), list.span());
-					new_nodes.push(line);
+					new_nodes.push(src.get(cur..idx));
 				}
 				cur = idx + 1;
 			}
 
-			if cur < list.len() {
-				let list = program.split_list(list, cur..);
-				let line = program.new_node(Expr::Seq(list), list.span());
-				new_nodes.push(line);
+			if cur < src.len() {
+				new_nodes.push(src.get(cur..));
 			}
 
-			program.replace_list(list, new_nodes);
+			program.remove_nodes(src, ..);
+
+			let new_nodes = new_nodes
+				.into_iter()
+				.map(|list| {
+					let list = program.slice_to_list(list);
+					let line = program.new_node(Expr::Seq(list), list.span());
+					line
+				})
+				.collect::<Vec<_>>();
+
+			program.replace_list(src, new_nodes);
 		}
 		Ok(())
 	}
 }
+
+pub struct ForEach;
+
+impl<'a> Operator<'a> for ForEach {
+	fn execute(&self, program: &mut Program<'a>, key: Key<'a>, nodes: Vec<Node<'a>>, range: Range) -> Result<()> {
+		todo!()
+	}
+}
+
+pub struct MakeRange;
+
+impl<'a> Operator<'a> for MakeRange {
+	fn execute(&self, program: &mut Program<'a>, key: Key<'a>, nodes: Vec<Node<'a>>, range: Range) -> Result<()> {
+		for it in nodes {
+			let list = if let Some(list) = it.parent() {
+				list
+			} else {
+				continue;
+			};
+
+			let prev = it.prev();
+			let next = it.next();
+
+			let prev = if let Some(prev) = prev {
+				prev
+			} else {
+				Err(format!("expected range start before {it:?}"))?
+			};
+
+			let next = if let Some(next) = next {
+				next
+			} else {
+				Err(format!("expected range end {it:?}"))?
+			};
+
+			let next = program.new_list([next]);
+			let prev = program.new_list([prev]);
+
+			let sta = it.index() - 1;
+			let end = it.index() + 2;
+
+			let span = Span::range(prev.span(), next.span());
+			let range = Expr::Range(prev, next);
+			let range = program.new_node(range, span);
+			program.splice_list(list, sta..end, [range]);
+		}
+		Ok(())
+	}
+}
+
+//====================================================================================================================//
+// Helper code
+//====================================================================================================================//
 
 fn split_by_list<'a>(nodes: Vec<Node<'a>>) -> NodesByList<'a> {
 	let mut sorted_nodes = nodes;

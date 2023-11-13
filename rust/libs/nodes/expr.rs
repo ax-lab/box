@@ -4,6 +4,8 @@ use super::*;
 pub enum Key<'a> {
 	None,
 	LBreak,
+	Id(Str<'a>),
+	Op(Str<'a>),
 	Let,
 	Var(Str<'a>),
 }
@@ -12,7 +14,10 @@ pub enum Key<'a> {
 pub enum Expr<'a> {
 	LBreak,
 	Id(Str<'a>),
+	Op(Str<'a>),
 	Num(i32),
+	Str(Str<'a>),
+	Range(NodeList<'a>, NodeList<'a>),
 	Seq(NodeList<'a>),
 	Const(Value<'a>),
 	Let(Str<'a>, Node<'a>),
@@ -28,6 +33,8 @@ impl<'a> Expr<'a> {
 	pub fn key(&self) -> Key<'a> {
 		match self {
 			Expr::LBreak => Key::LBreak,
+			Expr::Id(s) => Key::Id(*s),
+			Expr::Op(s) => Key::Op(*s),
 			Expr::Let(..) => Key::Let,
 			Expr::Var(s) => Key::Var(*s),
 			_ => Key::None,
@@ -35,26 +42,26 @@ impl<'a> Expr<'a> {
 	}
 }
 
-impl<'a> Expr<'a> {
+impl<'a> Node<'a> {
 	pub fn compile(&self) -> Result<Code<'a>> {
-		let code = match self {
+		let code = match self.expr() {
 			Expr::Seq(list) => {
 				let mut output = Vec::new();
 				for it in list.nodes() {
-					let code = it.expr().compile()?;
+					let code = it.compile()?;
 					output.push(code);
 				}
 				Code::Seq(output)
 			}
 			Expr::Const(value) => Code::Const(value.clone()),
 			Expr::OpAdd(lhs, rhs) => {
-				let lhs = lhs.expr().compile()?;
-				let rhs = rhs.expr().compile()?;
+				let lhs = lhs.compile()?;
+				let rhs = rhs.compile()?;
 				Code::Add(lhs.into(), rhs.into())
 			}
 			Expr::OpMul(lhs, rhs) => {
-				let lhs = lhs.expr().compile()?;
-				let rhs = rhs.expr().compile()?;
+				let lhs = lhs.compile()?;
+				let rhs = rhs.compile()?;
 				Code::Mul(lhs.into(), rhs.into())
 			}
 			Expr::Print(args) => {
@@ -62,7 +69,7 @@ impl<'a> Expr<'a> {
 				Code::Print(args)
 			}
 			Expr::RefInit(decl) => {
-				let expr = decl.expr().compile()?;
+				let expr = decl.node().compile()?;
 				let expr = Code::Set(decl.name(), expr.into());
 				decl.set_init();
 				expr
@@ -74,7 +81,7 @@ impl<'a> Expr<'a> {
 				};
 				Code::Get(decl.name())
 			}
-			expr => Err(format!("expression cannot be compiled: {expr:?}"))?,
+			expr => Err(format!("expression cannot be compiled: {self:?}"))?,
 		};
 		Ok(code)
 	}
@@ -84,7 +91,7 @@ impl<'a> Expr<'a> {
 		'a: 'b,
 	{
 		let list = list.into_iter();
-		let list = list.map(|x| x.expr().compile()).collect::<Result<_>>()?;
+		let list = list.map(|x| x.compile()).collect::<Result<_>>()?;
 		Ok(list)
 	}
 }

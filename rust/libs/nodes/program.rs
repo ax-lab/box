@@ -1,21 +1,11 @@
 use super::*;
 
-#[derive(Default)]
-pub(crate) struct PendingWrites<'a> {
-	pub write: Vec<(Node<'a>, Expr<'a>, Span)>,
-	pub index: Vec<NodeList<'a>>,
-	pub splice: Vec<NodeSplice<'a>>,
-	pub replace: Vec<NodesReplace<'a>>,
-	pub temp: Vec<Node<'a>>,
-}
-
 impl<'a> Program<'a> {
 	pub fn new(store: &'a Store) -> Self {
 		let program = Self {
 			store,
 			output_code: Default::default(),
 			engine: engine::Engine::new(),
-			pending: Default::default(),
 		};
 		program
 	}
@@ -57,13 +47,11 @@ impl<'a> Program<'a> {
 			let key = *next.key();
 			let range = *next.range();
 			let nodes = next.into_nodes();
+
 			op.execute(self, key, nodes, range)?;
-			self.process_writes();
 		}
 
-		self.output_code = self.remove_nodes(list, ..);
-		self.process_writes();
-
+		self.output_code = self.remove_nodes(list, ..).to_vec();
 		Ok(())
 	}
 
@@ -71,7 +59,7 @@ impl<'a> Program<'a> {
 		self.check_unbound(|s| eprint!("{s}"))?;
 		let mut code = Vec::new();
 		for it in self.output_code.iter() {
-			let it = it.expr().compile()?;
+			let it = it.compile()?;
 			code.push(it);
 		}
 		Ok(code)
@@ -95,6 +83,13 @@ impl<'a> Program<'a> {
 					output_error(&format!("- {node:?}\n"));
 				}
 			}
+			output_error("\n");
+
+			output_error("PROGRAM DUMP:\n\n");
+			for it in self.output_code.iter() {
+				output_error(&format!("- {it}\n"));
+			}
+
 			output_error("\n");
 
 			Err("compiling program: some nodes were not resolved")?;

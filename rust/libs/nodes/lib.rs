@@ -127,7 +127,6 @@ pub struct Program<'a> {
 	store: &'a Store,
 	output_code: Vec<Node<'a>>,
 	engine: engine::Engine<Node<'a>>,
-	pending: PendingWrites<'a>,
 }
 
 //====================================================================================================================//
@@ -872,15 +871,48 @@ mod tests {
 	}
 
 	#[test]
-	#[cfg(no)]
 	fn foreach() -> Result<()> {
 		let expected_output = vec!["Item 1", "Item 2", "Item 3", "Item 4", ""].join("\n");
-		let expected_value = Value::Unit;
+		let expected_value = Value::Int(4);
 
 		let store = Store::new();
 		let mut program = Program::new(&store);
 
-		// ID(foreach) ID(it) ID(in) NUM(1) ".." NUM(5) ":" ID(print) STR("Item") VAR(it)
+		let mut b = Builder::new(&mut program);
+		let kw_for = b.str("foreach");
+		let op_range = b.str("..");
+
+		b.bind_all(Key::LBreak, op::SplitAt, 0);
+		b.bind_all(Key::Op(op_range), op::MakeRange, 1);
+		b.bind_all(Key::Id(kw_for), op::ForEach, 2);
+
+		let var = b.str("it");
+		let foreach = [
+			b.node(Expr::Id(kw_for)),
+			b.node(Expr::Id(var)),
+			b.node(Expr::Id(b.str("in"))),
+			b.node(Expr::Num(1)),
+			b.node(Expr::Op(op_range)),
+			b.node(Expr::Num(5)),
+			b.node(Expr::Op(b.str(":"))),
+		];
+
+		let print = [
+			b.node(Expr::Id(b.str("print"))),
+			b.node(Expr::Str(b.str("Item"))),
+			b.node(Expr::Id(var)),
+			b.node(Expr::LBreak),
+		];
+
+		b.output(foreach);
+		b.output(print);
+
+		let out = b.node(Expr::Id(var));
+		b.output([out]);
+
+		b.done();
+
+		program.resolve()?;
 
 		let mut rt = Runtime::new(&store);
 		let val = program.run(&mut rt)?;

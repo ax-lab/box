@@ -29,7 +29,7 @@ pub type Precedence = i32;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct NodeList<'a> {
-	data: *mut NodeListData<'a>,
+	data: *mut NodeListData<'a>, // TODO: make this into a non-mut ref
 }
 
 impl<'a> NodeList<'a> {
@@ -66,6 +66,23 @@ impl<'a> NodeList<'a> {
 	fn data(&self) -> &'a NodeListData<'a> {
 		unsafe { &*self.data }
 	}
+
+	fn set_dirty(&self) {
+		let data = self.data();
+		data.dirty.set(true);
+	}
+
+	fn reindex(&self) {
+		let data = self.data();
+		if data.dirty.get() {
+			data.dirty.set(false);
+			for i in 0..data.nodes.len() {
+				let data = data.nodes[i].data();
+				data.list.set(Some(*self));
+				data.list_index.set(i);
+			}
+		}
+	}
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
@@ -75,13 +92,12 @@ pub struct Node<'a> {
 
 impl Store {
 	pub(crate) fn alloc_node<'a>(&'a self, expr: Expr<'a>, span: Span) -> Node<'a> {
+		let expr = self.arena.store(expr);
 		let data = self.arena.store(NodeData {
 			expr,
 			expr_span: span,
-			expr_modified: Cell::new(0),
-			list: None,
-			list_index: 0,
-			list_modified: Cell::new(0),
+			list: Default::default(),
+			list_index: Default::default(),
 		});
 		Node { data }
 	}
@@ -95,12 +111,42 @@ impl<'a> Node<'a> {
 
 	pub fn parent(&self) -> Option<NodeList<'a>> {
 		let data = self.data();
-		data.list
+		data.list.get()
+	}
+
+	pub fn prev(&self) -> Option<Node<'a>> {
+		let data = self.data();
+		if let Some(list) = data.list.get() {
+			list.reindex();
+			let index = data.list_index.get();
+			if index > 0 {
+				let nodes = list.nodes();
+				return Some(nodes[index - 1]);
+			}
+		}
+		None
+	}
+
+	pub fn next(&self) -> Option<Node<'a>> {
+		let data = self.data();
+		if let Some(list) = data.list.get() {
+			list.reindex();
+			let index = data.list_index.get();
+			let nodes = list.nodes();
+			nodes.get(index + 1).copied()
+		} else {
+			None
+		}
 	}
 
 	pub fn index(&self) -> usize {
 		let data = self.data();
-		data.list_index
+		if let Some(list) = data.list.get() {
+			list.reindex();
+			data.list_index.get()
+		} else {
+			0
+		}
 	}
 
 	pub fn key(&self) -> Key<'a> {
@@ -109,7 +155,7 @@ impl<'a> Node<'a> {
 
 	pub fn expr(&self) -> &'a Expr<'a> {
 		let data = self.data();
-		&data.expr
+		data.expr
 	}
 
 	pub fn span(&self) -> Span {
@@ -167,188 +213,110 @@ impl<'a> Display for NodeList<'a> {
 }
 
 struct NodeListData<'a> {
-	modified: Cell<u64>,
+	dirty: Cell<bool>,
 	nodes: &'a [Node<'a>],
 }
 
-impl<'a> NodeListData<'a> {
-	fn reindex(&mut self, from: usize, timestamp: u64) {
-		for i in from..self.nodes.len() {
-			let node = self.nodes[i];
-			let data = unsafe { &mut *node.data };
-			if data.list_modified.get() >= timestamp {
-				panic!("node list write conflict: {node:?}");
-			}
-			data.list = Some(NodeList { data: self });
-			data.list_index = i;
-			data.list_modified.set(timestamp);
-		}
-	}
-}
-
 struct NodeData<'a> {
-	expr: Expr<'a>,
+	expr: &'a Expr<'a>,
 	expr_span: Span,
-	expr_modified: Cell<u64>,
-	list: Option<NodeList<'a>>,
-	list_index: usize,
-	list_modified: Cell<u64>,
+	list: Cell<Option<NodeList<'a>>>,
+	list_index: Cell<usize>,
 }
 
 impl<'a> Program<'a> {
+	pub fn slice_to_list(&mut self, nodes: &[Node<'a>]) -> NodeList<'a> {
+		self.new_list(nodes.iter().copied())
+	}
+
 	pub fn new_list<T: IntoIterator<Item = Node<'a>>>(&mut self, nodes: T) -> NodeList<'a> {
 		let nodes = self.store.add_items(nodes);
 		let data = self.store.add(NodeListData {
+			dirty: false.into(),
 			nodes,
-			modified: 0.into(),
 		});
 		let list = NodeList { data };
 		for (n, it) in list.nodes().iter().enumerate() {
 			let data = unsafe { &mut *it.data };
-			if data.list.is_some() {
+			if data.list.get().is_some() {
 				panic!("Program::new_list: node already has a parent list: {it:?}");
 			}
-			data.list = Some(list);
-			data.list_index = n;
+			data.list.set(Some(list));
+			data.list_index.set(n);
 		}
 		list
 	}
 
 	pub fn set_node(&mut self, node: Node<'a>, expr: Expr<'a>) {
-		let data = node.data();
-		self.pending.write.push((node, expr, data.expr_span));
+		let data = unsafe { &mut *node.data };
+		let expr = self.store.add(expr);
+		data.expr = expr;
 	}
 
 	pub fn split_list<R: RangeBounds<usize>>(&mut self, source: NodeList<'a>, range: R) -> NodeList<'a> {
-		let range = compute_range(range, source.len());
-
-		// we temporarily violate the parent list constraint for the nodes,
-		// until `process_writes` is called, to allow for better ergonomics
-		// when creating new nodes
-		let nodes = source.nodes();
-		let nodes = &nodes[range.start..range.end];
+		let nodes = self.remove_nodes(source, range);
 		let data = self.store.add(NodeListData {
 			nodes,
-			modified: 0.into(),
+			dirty: true.into(),
 		});
+
 		let new_list = NodeList { data };
-		self.pending.splice.push(NodeSplice {
-			list: source,
-			replace: range,
-			insert: &[],
-		});
-		self.pending.index.push(new_list);
 		new_list
 	}
 
-	pub fn remove_nodes<R: RangeBounds<usize>>(&mut self, list: NodeList<'a>, range: R) -> Vec<Node<'a>> {
+	pub fn remove_nodes<R: RangeBounds<usize>>(&mut self, list: NodeList<'a>, range: R) -> &'a [Node<'a>] {
+		self.splice_list(list, range, [])
+	}
+
+	pub fn replace_list<T: IntoIterator<Item = Node<'a>>>(
+		&mut self,
+		list: NodeList<'a>,
+		new_nodes: T,
+	) -> &'a [Node<'a>] {
+		self.splice_list(list, .., new_nodes)
+	}
+
+	pub fn splice_list<R: RangeBounds<usize>, T: IntoIterator<Item = Node<'a>>>(
+		&mut self,
+		list: NodeList<'a>,
+		range: R,
+		items: T,
+	) -> &'a [Node<'a>] {
 		let range = compute_range(range, list.len());
-		let nodes = list.get(range.clone());
-		self.pending.splice.push(NodeSplice {
-			list,
-			replace: range,
-			insert: &[],
-		});
-		Vec::from(nodes)
-	}
+		let sta = range.start;
+		let end = range.end;
 
-	pub fn replace_list<T: IntoIterator<Item = Node<'a>>>(&mut self, list: NodeList<'a>, new_nodes: T) {
-		let new_nodes = self.store.add_items(new_nodes);
-		self.pending.replace.push(NodesReplace { list, nodes: new_nodes });
-	}
+		let data = unsafe { &mut *list.data };
+		let mut new_list = Vec::new();
 
-	pub fn process_writes(&mut self) {
-		static TIMESTAMP: AtomicU64 = AtomicU64::new(1);
-		let now = TIMESTAMP.fetch_add(1, Ordering::Relaxed);
-
-		for (node, expr, span) in self.pending.write.drain(..) {
-			let data = unsafe { &mut *(node.data as *mut NodeData<'a>) };
-			if data.expr_modified.get() >= now {
-				panic!("NodeChange::Set: node expr write conflict: {node:?}");
-			}
-			data.expr = expr;
-			data.expr_modified.set(now);
+		let removed_nodes = &data.nodes[sta..end];
+		if sta > 0 {
+			new_list.extend_from_slice(&data.nodes[..sta]);
 		}
 
-		for NodesReplace { list, nodes } in self.pending.replace.drain(..) {
-			let data = unsafe { &mut *list.data };
-			if data.modified.get() >= now {
-				panic!("replacement target list was already modified: {list:?}");
+		for node in items.into_iter() {
+			let node_data = unsafe { &mut *node.data };
+			if node_data.list.get().is_some() {
+				panic!("adding node to list: node is already on a list -- {node:?}");
 			}
-
-			data.modified.set(now);
-			data.nodes = nodes;
-			data.reindex(0, now);
+			node_data.list.set(Some(list));
+			new_list.push(node);
 		}
 
-		let splice = &mut self.pending.splice;
-		splice.sort_by_key(|x| (x.list.id(), x.replace.start, x.insert.len() == 0));
-
-		let mut temp = &mut self.pending.temp;
-		let mut index = 0;
-		while let Some(NodeSplice { list, .. }) = splice.get(index) {
-			let list = *list;
-			let data = unsafe { &mut *list.data };
-			let len = splice[index..].partition_point(|x| x.list == list);
-			let changes = &splice[index..index + len];
-			index += len;
-
-			let already_replaced = data.modified.get() == now;
-			if already_replaced {
-				continue;
-			} else {
-				data.modified.set(now);
-			}
-
-			let mut offset = 0;
-			temp.truncate(0);
-			for NodeSplice { replace, insert, .. } in changes {
-				let sta = replace.start;
-				let end = replace.end;
-				if sta > offset {
-					temp.extend_from_slice(&data.nodes[offset..sta]);
-				}
-
-				let sta = if sta < offset {
-					if insert.len() == 0 {
-						if end < offset {
-							continue;
-						}
-						offset
-					} else {
-						panic!("node list splicing: write conflict");
-					}
-				} else {
-					sta
-				};
-
-				for node in data.nodes[sta..end].iter() {
-					let node_data = unsafe { &mut *node.data };
-					if node_data.list.is_some() && node_data.list_modified.get() >= now {
-						panic!("removing node from list: node has been modified: {node:?}");
-					}
-					node_data.list_modified.set(now);
-					node_data.list = None;
-					node_data.list_index = 0;
-				}
-
-				offset = end;
-				temp.extend_from_slice(insert);
-			}
-
-			temp.extend_from_slice(&data.nodes[offset..]);
-
-			let nodes = self.store.add_items(temp.iter().copied());
-			data.nodes = nodes;
-			data.reindex(0, now);
-			temp.truncate(0);
+		if end < list.len() {
+			new_list.extend_from_slice(&data.nodes[end..]);
 		}
-		splice.truncate(0);
 
-		for list in self.pending.index.drain(..) {
-			let data = unsafe { &mut *list.data };
-			data.reindex(0, now);
+		for node in removed_nodes {
+			let node_data = unsafe { &mut *node.data };
+			node_data.list.set(None);
+			node_data.list_index.set(0);
 		}
+
+		data.nodes = self.store.add_items(new_list);
+		data.dirty.set(true);
+
+		removed_nodes
 	}
 }
 
@@ -363,19 +331,8 @@ fn compute_range<R: RangeBounds<usize>>(range: R, len: usize) -> StdRange {
 		std::ops::Bound::Excluded(&n) => n,
 		std::ops::Bound::Unbounded => len,
 	};
-	if sta >= len || end > len {
+	if sta > end || end > len {
 		panic!("invalid range bounds `{sta}..{end}` for length {len}");
 	}
 	sta..end
-}
-
-pub(crate) struct NodeSplice<'a> {
-	pub list: NodeList<'a>,
-	pub replace: StdRange,
-	pub insert: &'a [Node<'a>],
-}
-
-pub(crate) struct NodesReplace<'a> {
-	pub list: NodeList<'a>,
-	pub nodes: &'a [Node<'a>],
 }
