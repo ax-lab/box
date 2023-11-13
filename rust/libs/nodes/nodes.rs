@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::hash::Hash;
 use std::ops::RangeBounds;
 use std::slice::SliceIndex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -27,15 +28,15 @@ impl<'a> IsNode<Node<'a>> for Node<'a> {
 
 pub type Precedence = i32;
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone)]
 pub struct NodeList<'a> {
-	data: *mut NodeListData<'a>, // TODO: make this into a non-mut ref
+	data: &'a NodeListData<'a>,
 }
 
 impl<'a> NodeList<'a> {
 	/// Non-zero unique identifier for this list.
 	pub fn id(&self) -> usize {
-		self.data as usize
+		self.data as *const _ as usize
 	}
 
 	pub fn get<R: RangeBounds<usize>>(&self, range: R) -> &'a [Node<'a>] {
@@ -45,18 +46,17 @@ impl<'a> NodeList<'a> {
 	}
 
 	pub fn len(&self) -> usize {
-		let data = self.data();
-		data.nodes.len()
+		self.nodes().len()
 	}
 
 	pub fn nodes(&self) -> &'a [Node<'a>] {
 		let data = self.data();
-		data.nodes
+		data.nodes.get()
 	}
 
 	pub fn span(&self) -> Span {
 		let data = self.data();
-		let nodes = data.nodes;
+		let nodes = self.nodes();
 		let first = nodes.first().map(|x| x.span()).unwrap_or_default();
 		let last = nodes.last().map(|x| x.span()).unwrap_or_default();
 		let span = Span::range(first, last);
@@ -64,7 +64,7 @@ impl<'a> NodeList<'a> {
 	}
 
 	fn data(&self) -> &'a NodeListData<'a> {
-		unsafe { &*self.data }
+		self.data
 	}
 
 	fn set_dirty(&self) {
@@ -74,10 +74,11 @@ impl<'a> NodeList<'a> {
 
 	fn reindex(&self) {
 		let data = self.data();
+		let nodes = data.nodes.get();
 		if data.dirty.get() {
 			data.dirty.set(false);
-			for i in 0..data.nodes.len() {
-				let data = data.nodes[i].data();
+			for i in 0..nodes.len() {
+				let data = nodes[i].data();
 				data.list.set(Some(*self));
 				data.list_index.set(i);
 			}
@@ -85,16 +86,30 @@ impl<'a> NodeList<'a> {
 	}
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+impl<'a> Eq for NodeList<'a> {}
+
+impl<'a> PartialEq for NodeList<'a> {
+	fn eq(&self, other: &Self) -> bool {
+		self.data as *const _ == other.data as *const _
+	}
+}
+
+impl<'a> Hash for NodeList<'a> {
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+		(self.data as *const NodeListData).hash(state);
+	}
+}
+
+#[derive(Copy, Clone)]
 pub struct Node<'a> {
-	data: *mut NodeData<'a>,
+	data: &'a NodeData<'a>,
 }
 
 impl Store {
 	pub(crate) fn alloc_node<'a>(&'a self, expr: Expr<'a>, span: Span) -> Node<'a> {
 		let expr = self.arena.store(expr);
 		let data = self.arena.store(NodeData {
-			expr,
+			expr: Cell::new(expr),
 			expr_span: span,
 			list: Default::default(),
 			list_index: Default::default(),
@@ -106,7 +121,7 @@ impl Store {
 impl<'a> Node<'a> {
 	/// Non-zero unique identifier for this node.
 	pub fn id(&self) -> usize {
-		self.data as usize
+		self.data as *const _ as usize
 	}
 
 	pub fn parent(&self) -> Option<NodeList<'a>> {
@@ -155,7 +170,7 @@ impl<'a> Node<'a> {
 
 	pub fn expr(&self) -> &'a Expr<'a> {
 		let data = self.data();
-		data.expr
+		data.expr.get()
 	}
 
 	pub fn span(&self) -> Span {
@@ -164,7 +179,21 @@ impl<'a> Node<'a> {
 	}
 
 	fn data(&self) -> &'a NodeData<'a> {
-		unsafe { &*self.data }
+		self.data
+	}
+}
+
+impl<'a> Eq for Node<'a> {}
+
+impl<'a> PartialEq for Node<'a> {
+	fn eq(&self, other: &Self) -> bool {
+		self.data as *const _ == other.data as *const _
+	}
+}
+
+impl<'a> Hash for Node<'a> {
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+		(self.data as *const NodeData).hash(state);
 	}
 }
 
@@ -214,11 +243,11 @@ impl<'a> Display for NodeList<'a> {
 
 struct NodeListData<'a> {
 	dirty: Cell<bool>,
-	nodes: &'a [Node<'a>],
+	nodes: Cell<&'a [Node<'a>]>,
 }
 
 struct NodeData<'a> {
-	expr: &'a Expr<'a>,
+	expr: Cell<&'a Expr<'a>>,
 	expr_span: Span,
 	list: Cell<Option<NodeList<'a>>>,
 	list_index: Cell<usize>,
@@ -232,12 +261,12 @@ impl<'a> Program<'a> {
 	pub fn new_list<T: IntoIterator<Item = Node<'a>>>(&mut self, nodes: T) -> NodeList<'a> {
 		let nodes = self.store.add_items(nodes);
 		let data = self.store.add(NodeListData {
+			nodes: Cell::new(nodes),
 			dirty: false.into(),
-			nodes,
 		});
 		let list = NodeList { data };
 		for (n, it) in list.nodes().iter().enumerate() {
-			let data = unsafe { &mut *it.data };
+			let data = it.data();
 			if data.list.get().is_some() {
 				panic!("Program::new_list: node already has a parent list: {it:?}");
 			}
@@ -248,15 +277,15 @@ impl<'a> Program<'a> {
 	}
 
 	pub fn set_node(&mut self, node: Node<'a>, expr: Expr<'a>) {
-		let data = unsafe { &mut *node.data };
+		let data = node.data();
 		let expr = self.store.add(expr);
-		data.expr = expr;
+		data.expr.set(expr);
 	}
 
 	pub fn split_list<R: RangeBounds<usize>>(&mut self, source: NodeList<'a>, range: R) -> NodeList<'a> {
 		let nodes = self.remove_nodes(source, range);
 		let data = self.store.add(NodeListData {
-			nodes,
+			nodes: Cell::new(nodes),
 			dirty: true.into(),
 		});
 
@@ -286,16 +315,17 @@ impl<'a> Program<'a> {
 		let sta = range.start;
 		let end = range.end;
 
-		let data = unsafe { &mut *list.data };
+		let data = list.data();
+		let nodes = data.nodes.get();
 		let mut new_list = Vec::new();
 
-		let removed_nodes = &data.nodes[sta..end];
+		let removed_nodes = &nodes[sta..end];
 		if sta > 0 {
-			new_list.extend_from_slice(&data.nodes[..sta]);
+			new_list.extend_from_slice(&nodes[..sta]);
 		}
 
 		for node in items.into_iter() {
-			let node_data = unsafe { &mut *node.data };
+			let node_data = node.data();
 			if node_data.list.get().is_some() {
 				panic!("adding node to list: node is already on a list -- {node:?}");
 			}
@@ -304,16 +334,16 @@ impl<'a> Program<'a> {
 		}
 
 		if end < list.len() {
-			new_list.extend_from_slice(&data.nodes[end..]);
+			new_list.extend_from_slice(&nodes[end..]);
 		}
 
 		for node in removed_nodes {
-			let node_data = unsafe { &mut *node.data };
+			let node_data = node.data();
 			node_data.list.set(None);
 			node_data.list_index.set(0);
 		}
 
-		data.nodes = self.store.add_items(new_list);
+		data.nodes.set(self.store.add_items(new_list));
 		data.dirty.set(true);
 
 		removed_nodes
