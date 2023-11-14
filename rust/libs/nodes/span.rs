@@ -71,6 +71,12 @@ impl Span {
 			len: end - off,
 		}
 	}
+
+	pub fn with_len(&self, len: usize) -> Span {
+		let mut output = *self;
+		output.len = len;
+		output
+	}
 }
 
 impl Ord for Span {

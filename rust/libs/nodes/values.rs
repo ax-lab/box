@@ -19,6 +19,17 @@ impl<'a> Value<'a> {
 			Value::Tuple(_) => todo!(),
 		}
 	}
+
+	pub fn as_bool(&self) -> Result<bool> {
+		let result = match self {
+			Value::Unit => false,
+			Value::Int(v) => *v != 0,
+			Value::Str(v) => v.as_str() != "",
+			Value::Bool(v) => *v,
+			Value::Tuple(_) => Err("tuple is not convertible to bool")?,
+		};
+		Ok(result)
+	}
 }
 
 impl<'a> Debug for Value<'a> {

@@ -6,6 +6,7 @@ impl<'a> Program<'a> {
 			store,
 			output_code: Default::default(),
 			engine: engine::Engine::new(),
+			debug: false,
 		};
 		program
 	}
@@ -49,6 +50,9 @@ impl<'a> Program<'a> {
 			let nodes = next.into_nodes();
 			let nodes = nodes.into_iter().filter(|x| !x.is_done()).collect::<Vec<_>>();
 			if nodes.len() > 0 {
+				if self.debug {
+					println!("\nOP: {op:?} for {key:?} in {range:?} ==> {nodes:#?}\n");
+				}
 				op.execute(self, key, nodes, range)?;
 			}
 		}
@@ -61,7 +65,7 @@ impl<'a> Program<'a> {
 		self.check_unbound(|s| eprint!("{s}"))?;
 		let mut code = Vec::new();
 		for it in self.output_code.iter() {
-			let it = it.compile()?;
+			let it = it.compile(self)?;
 			code.push(it);
 		}
 		Ok(code)
@@ -74,6 +78,19 @@ impl<'a> Program<'a> {
 			value = rt.execute(&it)?;
 		}
 		Ok(value)
+	}
+
+	pub fn dump(&self) {
+		println!();
+		self.dump_to(|s| print!("{s}"));
+		println!();
+	}
+
+	pub fn dump_to<T: FnMut(&str)>(&self, mut output: T) {
+		output("PROGRAM DUMP:\n\n");
+		for it in self.output_code.iter() {
+			output(&format!("- {it}\n"));
+		}
 	}
 
 	fn check_unbound<T: FnMut(&str)>(&self, mut output_error: T) -> Result<()> {
@@ -94,13 +111,13 @@ impl<'a> Program<'a> {
 					output_error(&format!("- {node:?}\n"));
 				}
 			}
-			output_error("\n");
 
-			output_error("PROGRAM DUMP:\n\n");
-			for it in self.output_code.iter() {
-				output_error(&format!("- {it}\n"));
+			if !has_error {
+				return Ok(());
 			}
 
+			output_error("\n");
+			self.dump_to(&mut output_error);
 			output_error("\n");
 
 			Err("compiling program: some nodes were not resolved")?;

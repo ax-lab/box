@@ -10,7 +10,7 @@ impl<'a> Program<'a> {
 
 	pub fn var<T: AsRef<str>>(&mut self, name: T, span: Span) -> Node<'a> {
 		let name = self.store.str(name);
-		self.new_node(Expr::Var(name), span)
+		self.new_node(Expr::Id(name), span)
 	}
 
 	pub fn seq<T: IntoIterator<Item = Node<'a>>>(&mut self, nodes: T) -> Node<'a> {

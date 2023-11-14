@@ -119,7 +119,8 @@ impl Store {
 	}
 }
 
-pub trait Operator<'a> {
+pub trait Operator<'a>: Debug {
+	// TODO: this should be by List instead, with nodes as an argument.
 	fn execute(&self, program: &mut Program<'a>, key: Key<'a>, nodes: Vec<Node<'a>>, range: Range) -> Result<()>;
 }
 
@@ -127,6 +128,7 @@ pub struct Program<'a> {
 	store: &'a Store,
 	output_code: Vec<Node<'a>>,
 	engine: engine::Engine<Node<'a>>,
+	debug: bool,
 }
 
 //====================================================================================================================//
@@ -793,7 +795,8 @@ mod tests {
 
 		let m1 = program.new_node(m1, Span { src: 0, off: 0, len: 1 });
 		let m2 = program.new_node(m2, Span { src: 0, off: 1, len: 2 });
-		let print = Expr::Print(vec![m1, m2]);
+		let args = program.new_list([m1, m2]);
+		let print = Expr::Print(args);
 		let print = program.new_node(print, Span { src: 0, off: 0, len: 2 });
 		program.output([print]);
 		program.resolve()?;
@@ -843,10 +846,12 @@ mod tests {
 		let ans = program.op_add(ans, c);
 		program.decl("ans", ans, ans.span());
 
-		let print = Expr::Print(vec![
+		let args = [
 			program.var("s", Span { src: 0, off: 8, len: 1 }),
 			program.var("ans", Span { src: 0, off: 9, len: 1 }),
-		]);
+		];
+		let args = program.new_list(args);
+		let print = Expr::Print(args);
 
 		let p0 = program.new_node(print, Span { src: 0, off: 8, len: 2 });
 		let p1 = program.var(
@@ -872,19 +877,32 @@ mod tests {
 
 	#[test]
 	fn foreach() -> Result<()> {
+		/*
+			TODO: open issues
+
+			- span handling in code generation
+			- when to use node vs node list
+			- code formatting
+			- precedence of let bindings (use an intermediate node?)
+			- variable bindings in general
+		*/
 		let expected_output = vec!["Item 1", "Item 2", "Item 3", "Item 4", ""].join("\n");
-		let expected_value = Value::Int(4);
+		let expected_value = Value::Int(5);
 
 		let store = Store::new();
 		let mut program = Program::new(&store);
 
 		let mut b = Builder::new(&mut program);
 		let kw_for = b.str("foreach");
+		let kw_print = b.str("print");
 		let op_range = b.str("..");
 
 		b.bind_all(Key::LBreak, op::SplitAt, 0);
+		b.bind_all(Key::Let, op::Decl(-1), 0);
 		b.bind_all(Key::Op(op_range), op::MakeRange, 1);
-		b.bind_all(Key::Id(kw_for), op::ForEach, 2);
+		b.bind_all(Key::Id(kw_for), op::MakeForEach, 2);
+		b.bind_all(Key::ForEach, op::EvalForEach, 2);
+		b.bind_all(Key::Id(kw_print), op::Print, 3);
 
 		let var = b.str("it");
 		let foreach = [
@@ -913,6 +931,8 @@ mod tests {
 		b.done();
 
 		program.resolve()?;
+
+		// program.dump();
 
 		let mut rt = Runtime::new(&store);
 		let val = program.run(&mut rt)?;
@@ -979,10 +999,7 @@ mod tests {
 			.map(|x| format!("{}", x.expr()))
 			.collect::<Vec<_>>();
 
-		assert_eq!(
-			output,
-			["[ Id(line) Num(1) ]", "[ Id(line) Num(2) ]", "[ Id(line) Num(3) ]"]
-		);
+		assert_eq!(output, ["[ `line` 1 ]", "[ `line` 2 ]", "[ `line` 3 ]"]);
 
 		Ok(())
 	}

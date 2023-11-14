@@ -13,11 +13,13 @@ pub enum Code<'a> {
 	Bool(bool),
 	Add(Arc<Code<'a>>, Arc<Code<'a>>),
 	Mul(Arc<Code<'a>>, Arc<Code<'a>>),
+	Less(Arc<Code<'a>>, Arc<Code<'a>>),
 	Const(Value<'a>),
 	Seq(Vec<Code<'a>>),
 	Get(Str<'a>),
 	Set(Str<'a>, Arc<Code<'a>>),
 	Print(Vec<Code<'a>>),
+	While { cond: Arc<Code<'a>>, body: Arc<Code<'a>> },
 }
 
 impl<'a> Runtime<'a> {
@@ -64,6 +66,17 @@ impl<'a> Runtime<'a> {
 					Err(format!("mul is not defined for types `{ta:?}` and `{tb:?}`"))?
 				}
 			}
+			Code::Less(a, b) => {
+				let a = self.execute(a)?;
+				let b = self.execute(b)?;
+				let ta = a.get_type();
+				let tb = b.get_type();
+				if let (Value::Int(a), Value::Int(b)) = (a, b) {
+					Value::Bool(a < b)
+				} else {
+					Err(format!("less is not defined for types `{ta:?}` and `{tb:?}`"))?
+				}
+			}
 			Code::Print(args) => {
 				let args = args.iter().map(|x| self.execute(x)).collect::<Result<Vec<_>>>()?;
 				if args.len() == 0 {
@@ -96,6 +109,13 @@ impl<'a> Runtime<'a> {
 				self.vars.insert(*name, expr.clone());
 				expr
 			}
+			Code::While { cond, body } => loop {
+				let cond = self.execute(cond)?.as_bool()?;
+				if !cond {
+					break Value::Unit;
+				}
+				self.execute(body)?;
+			},
 		};
 		Ok(value)
 	}

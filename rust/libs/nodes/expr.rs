@@ -7,7 +7,7 @@ pub enum Key<'a> {
 	Id(Str<'a>),
 	Op(Str<'a>),
 	Let,
-	Var(Str<'a>),
+	ForEach,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -19,19 +19,24 @@ pub enum Expr<'a> {
 	Str(Str<'a>),
 	Range(NodeList<'a>, NodeList<'a>),
 	ForEach {
-		var: Str<'a>,
+		decl: &'a op::LetDecl<'a>,
 		expr: NodeList<'a>,
 		body: NodeList<'a>,
+	},
+	While {
+		cond: Node<'a>,
+		body: Node<'a>,
 	},
 	Seq(NodeList<'a>),
 	Const(Value<'a>),
 	Let(Str<'a>, Node<'a>),
+	Set(Str<'a>, Node<'a>),
 	RefInit(&'a op::LetDecl<'a>),
 	Ref(&'a op::LetDecl<'a>),
-	Var(Str<'a>),
 	OpAdd(Node<'a>, Node<'a>),
 	OpMul(Node<'a>, Node<'a>),
-	Print(Vec<Node<'a>>),
+	OpLess(Node<'a>, Node<'a>),
+	Print(NodeList<'a>),
 }
 
 impl<'a> Expr<'a> {
@@ -41,40 +46,47 @@ impl<'a> Expr<'a> {
 			Expr::Id(s) => Key::Id(*s),
 			Expr::Op(s) => Key::Op(*s),
 			Expr::Let(..) => Key::Let,
-			Expr::Var(s) => Key::Var(*s),
+			Expr::ForEach { .. } => Key::ForEach,
 			_ => Key::None,
 		}
 	}
 }
 
 impl<'a> Node<'a> {
-	pub fn compile(&self) -> Result<Code<'a>> {
+	pub fn compile(&self, program: &Program<'a>) -> Result<Code<'a>> {
 		let code = match self.expr() {
+			Expr::Num(val) => Code::Int(*val),
+			Expr::Str(val) => Code::Str(*val),
 			Expr::Seq(list) => {
 				let mut output = Vec::new();
 				for it in list.nodes() {
-					let code = it.compile()?;
+					let code = it.compile(program)?;
 					output.push(code);
 				}
 				Code::Seq(output)
 			}
 			Expr::Const(value) => Code::Const(value.clone()),
 			Expr::OpAdd(lhs, rhs) => {
-				let lhs = lhs.compile()?;
-				let rhs = rhs.compile()?;
+				let lhs = lhs.compile(program)?;
+				let rhs = rhs.compile(program)?;
 				Code::Add(lhs.into(), rhs.into())
 			}
 			Expr::OpMul(lhs, rhs) => {
-				let lhs = lhs.compile()?;
-				let rhs = rhs.compile()?;
+				let lhs = lhs.compile(program)?;
+				let rhs = rhs.compile(program)?;
 				Code::Mul(lhs.into(), rhs.into())
 			}
+			Expr::OpLess(lhs, rhs) => {
+				let lhs = lhs.compile(program)?;
+				let rhs = rhs.compile(program)?;
+				Code::Less(lhs.into(), rhs.into())
+			}
 			Expr::Print(args) => {
-				let args = Self::compile_nodes(args)?;
+				let args = Self::compile_list(*args, program)?;
 				Code::Print(args)
 			}
 			Expr::RefInit(decl) => {
-				let expr = decl.node().compile()?;
+				let expr = decl.node().compile(program)?;
 				let expr = Code::Set(decl.name(), expr.into());
 				decl.set_init();
 				expr
@@ -86,17 +98,35 @@ impl<'a> Node<'a> {
 				};
 				Code::Get(decl.name())
 			}
+			Expr::Set(name, expr) => {
+				let expr = expr.compile(program)?;
+				Code::Set(*name, expr.into())
+			}
+			Expr::While { cond, body } => {
+				let cond = cond.compile(program)?;
+				let body = body.compile(program)?;
+				Code::While {
+					cond: cond.into(),
+					body: body.into(),
+				}
+			}
 			expr => Err(format!("expression cannot be compiled: {self:?}"))?,
 		};
 		Ok(code)
 	}
 
-	fn compile_nodes<'b, T: IntoIterator<Item = &'b Node<'a>>>(list: T) -> Result<Vec<Code<'a>>>
+	fn compile_list(list: NodeList<'a>, program: &Program<'a>) -> Result<Vec<Code<'a>>> {
+		let list = list.nodes().into_iter();
+		let list = list.map(|x| x.compile(program)).collect::<Result<_>>()?;
+		Ok(list)
+	}
+
+	fn compile_nodes<'b, T: IntoIterator<Item = &'b Node<'a>>>(list: T, program: &Program<'a>) -> Result<Vec<Code<'a>>>
 	where
 		'a: 'b,
 	{
 		let list = list.into_iter();
-		let list = list.map(|x| x.compile()).collect::<Result<_>>()?;
+		let list = list.map(|x| x.compile(program)).collect::<Result<_>>()?;
 		Ok(list)
 	}
 }
@@ -109,7 +139,10 @@ impl<'a> Display for Expr<'a> {
 			Expr::Id(id) => write!(f, "`{id}`"),
 			Expr::Seq(seq) => write!(f, "{seq}"),
 			Expr::Range(a, b) => write!(f, "Range({a}..{b})"),
-			Expr::ForEach { var, expr, body } => write!(f, "ForEach({var} in {expr}) => {body}"),
+			Expr::ForEach { decl, expr, body } => {
+				let var = decl.name();
+				write!(f, "ForEach({var} in {expr}) => {body}")
+			}
 			_ => write!(f, "{self:?}"),
 		}
 	}

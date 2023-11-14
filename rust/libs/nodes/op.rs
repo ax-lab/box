@@ -2,6 +2,7 @@ use std::cell::Cell;
 
 use super::*;
 
+#[derive(Debug)]
 pub struct Decl(pub Precedence);
 
 impl<'a> Operator<'a> for Decl {
@@ -18,7 +19,7 @@ impl<'a> Operator<'a> for Decl {
 				};
 				let decl = program.store(decl);
 				program.set_node(node, Expr::RefInit(decl));
-				program.bind(Key::Var(*name), span, BindVar(decl), self.0);
+				program.bind(Key::Id(*name), span, BindVar(decl), self.0);
 			} else {
 				Err(format!("unsupported let expression: {:?}", node.expr()))?;
 			}
@@ -55,10 +56,12 @@ impl<'a> LetDecl<'a> {
 impl<'a> Debug for LetDecl<'a> {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
 		let name = self.name;
-		write!(f, "LetDecl({name})")
+		let node = self.node;
+		write!(f, "LetDecl({name} = {node})")
 	}
 }
 
+#[derive(Debug)]
 pub struct BindVar<'a>(&'a LetDecl<'a>);
 
 impl<'a> Operator<'a> for BindVar<'a> {
@@ -73,6 +76,7 @@ impl<'a> Operator<'a> for BindVar<'a> {
 }
 
 /// Split a NodeList at the bound nodes.
+#[derive(Debug)]
 pub struct SplitAt;
 
 impl<'a> Operator<'a> for SplitAt {
@@ -114,9 +118,10 @@ impl<'a> Operator<'a> for SplitAt {
 	}
 }
 
-pub struct ForEach;
+#[derive(Debug)]
+pub struct MakeForEach;
 
-impl<'a> Operator<'a> for ForEach {
+impl<'a> Operator<'a> for MakeForEach {
 	fn execute(&self, program: &mut Program<'a>, key: Key<'a>, nodes: Vec<Node<'a>>, range: Range) -> Result<()> {
 		for it in nodes {
 			let list = if let Some(list) = it.parent() {
@@ -178,30 +183,71 @@ impl<'a> Operator<'a> for ForEach {
 			}
 
 			let span = Span::range(it.span(), nodes[expr_end].span());
-			let foreach = Expr::ForEach { var, expr, body };
-			let foreach = program.new_node(foreach, span);
 
-			let var_decl = LetDecl {
+			let decl = LetDecl {
 				name: var,
 				node: var_node,
 				init: false.into(),
 			};
-			let var_decl = program.store(var_decl);
+			let decl = program.store(decl);
 
-			let binding = body.span();
-			let binding_len = usize::MAX - binding.off;
-			let binding = Span {
-				len: binding_len,
-				..binding
-			};
-			program.bind(Key::Id(var), binding, BindVar(var_decl), -1);
-
+			let foreach = Expr::ForEach { decl, expr, body };
+			let foreach = program.new_node(foreach, span);
 			program.splice_list(list, sta.., [foreach]);
 		}
 		Ok(())
 	}
 }
 
+#[derive(Debug)]
+pub struct EvalForEach;
+
+impl<'a> Operator<'a> for EvalForEach {
+	fn execute(&self, program: &mut Program<'a>, key: Key<'a>, nodes: Vec<Node<'a>>, range: Range) -> Result<()> {
+		for it in nodes {
+			if let Expr::ForEach { decl, expr, body } = it.expr() {
+				let source = if expr.len() == 1 {
+					let nodes = expr.nodes();
+					nodes[0]
+				} else {
+					Err(format!("invalid foreach expression: {expr:?}"))?
+				};
+
+				let iter = source.expr().as_iterable(program)?;
+				let start = iter.start(program)?;
+
+				let span = decl.node().span();
+				let name = decl.name();
+				let var_span = body.span().with_len(1);
+				let var = program.new_node(Expr::Id(decl.name()), var_span);
+				let cond = iter.has_next(program, var)?;
+				let next = iter.next(program, var)?;
+				let next = Expr::Set(name, next);
+				let next = program.new_node(next, span);
+
+				let decl = Expr::Let(decl.name(), start);
+				let decl = program.new_node(decl, span);
+
+				let body_span = body.span();
+				let body = program.new_node(Expr::Seq(*body), body_span);
+				let body = program.new_list([body, next]);
+				let body = program.new_node(Expr::Seq(body), body_span);
+
+				let body = Expr::While { cond, body };
+				let body = program.new_node(body, span);
+
+				let code = program.new_list([decl, body]);
+				let code = Expr::Seq(code);
+				program.set_node(it, code);
+			} else {
+				Err(format!("invalid foreach node: {it}"))?;
+			}
+		}
+		Ok(())
+	}
+}
+
+#[derive(Debug)]
 pub struct MakeRange;
 
 impl<'a> Operator<'a> for MakeRange {
@@ -242,6 +288,78 @@ impl<'a> Operator<'a> for MakeRange {
 			program.splice_list(list, sta..sta, [range]);
 		}
 		Ok(())
+	}
+}
+
+#[derive(Debug)]
+pub struct Print;
+
+impl<'a> Operator<'a> for Print {
+	fn execute(&self, program: &mut Program<'a>, key: Key<'a>, nodes: Vec<Node<'a>>, range: Range) -> Result<()> {
+		for it in nodes {
+			let list = if let Some(list) = it.parent() {
+				list
+			} else {
+				continue;
+			};
+
+			let index = it.index();
+			let nodes = list.nodes();
+			program.remove_nodes(list, index..);
+
+			let args = program.slice_to_list(&nodes[index + 1..]);
+			let span = Span::range(nodes[index].span(), args.span());
+			let print = Expr::Print(args);
+			let print = program.new_node(print, span);
+			program.splice_list(list, index..index, [print]);
+		}
+		Ok(())
+	}
+}
+
+//====================================================================================================================//
+// Traits
+//====================================================================================================================//
+
+pub trait Iterable<'a> {
+	fn start(&self, program: &mut Program<'a>) -> Result<Node<'a>>;
+
+	fn has_next(&self, program: &mut Program<'a>, input: Node<'a>) -> Result<Node<'a>>;
+
+	fn next(&self, program: &mut Program<'a>, input: Node<'a>) -> Result<Node<'a>>;
+}
+
+impl<'a> Expr<'a> {
+	pub fn as_iterable(&self, program: &Program<'a>) -> Result<Arc<dyn Iterable<'a> + 'a>> {
+		if let &Expr::Range(sta, end) = self {
+			Ok(Arc::new(RangeIterator { sta, end }))
+		} else {
+			Err(format!("expression is not iterable: {self}"))?
+		}
+	}
+}
+
+struct RangeIterator<'a> {
+	sta: NodeList<'a>,
+	end: NodeList<'a>,
+}
+
+impl<'a> Iterable<'a> for RangeIterator<'a> {
+	fn start(&self, program: &mut Program<'a>) -> Result<Node<'a>> {
+		let node = program.new_node(Expr::Seq(self.sta), self.sta.span());
+		Ok(node)
+	}
+
+	fn has_next(&self, program: &mut Program<'a>, input: Node<'a>) -> Result<Node<'a>> {
+		let end = program.new_node(Expr::Seq(self.end), self.end.span());
+		let node = program.new_node(Expr::OpLess(input, end), input.span());
+		Ok(node)
+	}
+
+	fn next(&self, program: &mut Program<'a>, input: Node<'a>) -> Result<Node<'a>> {
+		let one = program.new_node(Expr::Num(1), input.span());
+		let node = program.new_node(Expr::OpAdd(input, one), input.span());
+		Ok(node)
 	}
 }
 
