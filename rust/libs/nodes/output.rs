@@ -12,239 +12,17 @@ const LF: u8 = '\n' as u8;
 
 const SEQ: Ordering = Ordering::SeqCst;
 
+/// Result of stream operations.
 pub type StreamResult = Result<()>;
+
+/// Function used to push the output of a [`StreamFilter`].
 pub trait StreamFn: FnMut(&[u8]) -> StreamResult {}
 
 impl<T: FnMut(&[u8]) -> StreamResult> StreamFn for T {}
 
+/// Trait for [`FilterWriter`] filters.
 pub trait StreamFilter: Clone {
 	fn output<T: StreamFn>(&mut self, pos: &PosInfo, buf: &[u8], push: T) -> StreamResult;
-}
-
-#[derive(Default)]
-pub struct PosInfo {
-	row: AtomicUsize,
-	col: AtomicUsize,
-	was_cr: AtomicBool,
-}
-
-impl PosInfo {
-	pub fn new() -> Self {
-		Self::default()
-	}
-
-	pub fn row(&self) -> usize {
-		self.row.load(SEQ)
-	}
-
-	pub fn col(&self) -> usize {
-		self.col.load(SEQ)
-	}
-
-	pub fn is_new_line(&self) -> bool {
-		self.col() == 0 && self.row() > 0
-	}
-
-	pub fn advance(&self, buf: &[u8]) {
-		for &chr in buf {
-			let crlf = chr == LF && self.was_cr.load(SEQ);
-			if crlf {
-				self.was_cr.store(false, SEQ);
-				continue;
-			}
-
-			let is_cr = chr == CR;
-			let eol = chr == LF || is_cr;
-			self.was_cr.store(is_cr, SEQ);
-			if eol {
-				self.col.store(0, SEQ);
-				self.row.fetch_add(1, SEQ);
-			} else {
-				self.col.fetch_add(1, SEQ);
-			}
-		}
-	}
-}
-
-impl Debug for PosInfo {
-	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-		let row = self.row();
-		let col = self.col();
-		write!(f, "<@{row}:{col}>")
-	}
-}
-
-#[derive(Default, Clone)]
-pub struct Buffer {
-	buffer: String,
-}
-
-impl Buffer {
-	pub fn new() -> Self {
-		Self::default()
-	}
-
-	pub fn len(&self) -> usize {
-		self.buffer.len()
-	}
-
-	pub fn as_str(&self) -> &str {
-		self.buffer.as_str()
-	}
-}
-
-impl std::io::Write for Buffer {
-	fn write(&mut self, buf: &[u8]) -> Result<usize> {
-		let str = match std::str::from_utf8(buf) {
-			Ok(str) => str,
-			Err(err) => Err(Error::new(ErrorKind::Unsupported, "non-utf8 data in buffer write"))?,
-		};
-		self.buffer.push_str(str);
-		Ok(buf.len())
-	}
-
-	fn flush(&mut self) -> Result<()> {
-		Ok(())
-	}
-}
-
-impl<T: Into<String>> From<T> for Buffer {
-	fn from(value: T) -> Self {
-		let buffer = value.into();
-		Self { buffer }
-	}
-}
-
-impl AsRef<str> for Buffer {
-	fn as_ref(&self) -> &str {
-		self.buffer.as_str()
-	}
-}
-
-impl Display for Buffer {
-	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-		write!(f, "{}", self.buffer)
-	}
-}
-
-#[derive(Clone)]
-struct IndentFilter {
-	prefix: Arc<String>,
-	indent: Arc<String>,
-	levels: usize,
-}
-
-impl IndentFilter {
-	pub fn new() -> Self {
-		Self::default()
-	}
-
-	pub fn indent(&mut self) {
-		self.levels += 1;
-	}
-
-	pub fn dedent(&mut self) {
-		if self.levels > 0 {
-			self.levels -= 1;
-		}
-	}
-}
-
-impl Default for IndentFilter {
-	fn default() -> Self {
-		Self {
-			prefix: String::new().into(),
-			indent: "    ".to_string().into(),
-			levels: 0,
-		}
-	}
-}
-
-impl StreamFilter for IndentFilter {
-	fn output<T: StreamFn>(&mut self, pos: &PosInfo, mut buf: &[u8], mut push: T) -> StreamResult {
-		while buf.len() > 0 {
-			let is_line_break = buf[0] == LF || buf[0] == CR;
-			if is_line_break {
-				let is_crlf = buf.len() > 1 && buf[0] == CR && buf[1] == LF;
-				push(&[LF])?;
-				buf = if is_crlf { &buf[2..] } else { &buf[1..] };
-			} else {
-				if pos.is_new_line() {
-					push(self.prefix.as_bytes())?;
-					for i in 0..self.levels {
-						push(self.indent.as_bytes())?;
-					}
-				}
-				push(&buf[..1])?;
-				buf = &buf[1..];
-			}
-		}
-
-		Ok(())
-	}
-}
-
-#[derive(Default, Clone)]
-pub struct FormatFilter {
-	indent: IndentFilter,
-	stack: Vec<char>,
-}
-
-impl FormatFilter {
-	pub fn new() -> Self {
-		Self::default()
-	}
-
-	fn get_matching(chr: char) -> Option<char> {
-		let chr = match chr {
-			'(' => ')',
-			'[' => ']',
-			'{' => '}',
-			'<' => '>',
-			_ => return None,
-		};
-		Some(chr)
-	}
-
-	fn indent(&mut self) {
-		self.indent.indent();
-	}
-
-	fn dedent(&mut self) {
-		self.indent.dedent();
-	}
-}
-
-impl StreamFilter for FormatFilter {
-	fn output<T: StreamFn>(&mut self, pos: &PosInfo, buf: &[u8], mut push: T) -> StreamResult {
-		let mut cur = 0;
-		for i in 0..buf.len() {
-			let chr = buf[i] as char;
-			let level = if let Some(paren) = Self::get_matching(chr) {
-				self.stack.push(paren);
-				1
-			} else if Some(&chr) == self.stack.last() {
-				self.stack.pop();
-				-1
-			} else {
-				0
-			};
-
-			if level != 0 && i > cur {
-				let off = if level > 0 { 1 } else { 0 };
-				self.indent.output(pos, &buf[cur..i + off], &mut push)?;
-				cur = i + off;
-			}
-
-			if level > 0 {
-				self.indent();
-			} else if level < 0 {
-				self.dedent();
-			}
-		}
-		self.indent.output(pos, &buf[cur..], &mut push)?;
-		Ok(())
-	}
 }
 
 pub struct FilterWriter<T: std::io::Write, U: StreamFilter> {
@@ -349,6 +127,237 @@ impl<T: std::io::Write, U: StreamFilter> FilterWriter<T, U> {
 	}
 }
 
+/// Maintains input position information for a [`FilterWriter`] and filters.
+#[derive(Default)]
+pub struct PosInfo {
+	row: AtomicUsize,
+	col: AtomicUsize,
+	was_cr: AtomicBool,
+}
+
+impl PosInfo {
+	pub fn new() -> Self {
+		Self::default()
+	}
+
+	pub fn row(&self) -> usize {
+		self.row.load(SEQ)
+	}
+
+	pub fn col(&self) -> usize {
+		self.col.load(SEQ)
+	}
+
+	pub fn is_new_line(&self) -> bool {
+		self.col() == 0 && self.row() > 0
+	}
+
+	pub fn advance(&self, buf: &[u8]) {
+		for &chr in buf {
+			let crlf = chr == LF && self.was_cr.load(SEQ);
+			if crlf {
+				self.was_cr.store(false, SEQ);
+				continue;
+			}
+
+			let is_cr = chr == CR;
+			let eol = chr == LF || is_cr;
+			self.was_cr.store(is_cr, SEQ);
+			if eol {
+				self.col.store(0, SEQ);
+				self.row.fetch_add(1, SEQ);
+			} else {
+				self.col.fetch_add(1, SEQ);
+			}
+		}
+	}
+}
+
+impl Debug for PosInfo {
+	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+		let row = self.row();
+		let col = self.col();
+		write!(f, "<@{row}:{col}>")
+	}
+}
+
+/// Helper string buffer writer.
+#[derive(Default, Clone)]
+pub struct Buffer {
+	buffer: String,
+}
+
+impl Buffer {
+	pub fn new() -> Self {
+		Self::default()
+	}
+
+	pub fn len(&self) -> usize {
+		self.buffer.len()
+	}
+
+	pub fn as_str(&self) -> &str {
+		self.buffer.as_str()
+	}
+}
+
+impl std::io::Write for Buffer {
+	fn write(&mut self, buf: &[u8]) -> Result<usize> {
+		let str = match std::str::from_utf8(buf) {
+			Ok(str) => str,
+			Err(err) => Err(Error::new(ErrorKind::Unsupported, "non-utf8 data in buffer write"))?,
+		};
+		self.buffer.push_str(str);
+		Ok(buf.len())
+	}
+
+	fn flush(&mut self) -> Result<()> {
+		Ok(())
+	}
+}
+
+impl<T: Into<String>> From<T> for Buffer {
+	fn from(value: T) -> Self {
+		let buffer = value.into();
+		Self { buffer }
+	}
+}
+
+impl AsRef<str> for Buffer {
+	fn as_ref(&self) -> &str {
+		self.buffer.as_str()
+	}
+}
+
+impl Display for Buffer {
+	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+		write!(f, "{}", self.buffer)
+	}
+}
+
+/// Implements manual indentation support in a [`FilterWriter`].
+#[derive(Clone)]
+struct IndentFilter {
+	prefix: Arc<String>,
+	indent: Arc<String>,
+	levels: usize,
+}
+
+impl IndentFilter {
+	pub fn new() -> Self {
+		Self::default()
+	}
+
+	pub fn indent(&mut self) {
+		self.levels += 1;
+	}
+
+	pub fn dedent(&mut self) {
+		if self.levels > 0 {
+			self.levels -= 1;
+		}
+	}
+}
+
+impl Default for IndentFilter {
+	fn default() -> Self {
+		Self {
+			prefix: String::new().into(),
+			indent: "    ".to_string().into(),
+			levels: 0,
+		}
+	}
+}
+
+impl StreamFilter for IndentFilter {
+	fn output<T: StreamFn>(&mut self, pos: &PosInfo, mut buf: &[u8], mut push: T) -> StreamResult {
+		while buf.len() > 0 {
+			let is_line_break = buf[0] == LF || buf[0] == CR;
+			if is_line_break {
+				let is_crlf = buf.len() > 1 && buf[0] == CR && buf[1] == LF;
+				push(&[LF])?;
+				buf = if is_crlf { &buf[2..] } else { &buf[1..] };
+			} else {
+				if pos.is_new_line() {
+					push(self.prefix.as_bytes())?;
+					for i in 0..self.levels {
+						push(self.indent.as_bytes())?;
+					}
+				}
+				push(&buf[..1])?;
+				buf = &buf[1..];
+			}
+		}
+
+		Ok(())
+	}
+}
+
+/// Implements automatic bracket indentation in a [`FilterWriter`].
+#[derive(Default, Clone)]
+pub struct FormatFilter {
+	indent: IndentFilter,
+	stack: Vec<char>,
+}
+
+impl FormatFilter {
+	pub fn new() -> Self {
+		Self::default()
+	}
+
+	fn get_matching(chr: char) -> Option<char> {
+		let chr = match chr {
+			'(' => ')',
+			'[' => ']',
+			'{' => '}',
+			'<' => '>',
+			_ => return None,
+		};
+		Some(chr)
+	}
+
+	fn indent(&mut self) {
+		self.indent.indent();
+	}
+
+	fn dedent(&mut self) {
+		self.indent.dedent();
+	}
+}
+
+impl StreamFilter for FormatFilter {
+	fn output<T: StreamFn>(&mut self, pos: &PosInfo, buf: &[u8], mut push: T) -> StreamResult {
+		let mut cur = 0;
+		for i in 0..buf.len() {
+			let chr = buf[i] as char;
+			let level = if let Some(paren) = Self::get_matching(chr) {
+				self.stack.push(paren);
+				1
+			} else if Some(&chr) == self.stack.last() {
+				self.stack.pop();
+				-1
+			} else {
+				0
+			};
+
+			if level != 0 && i > cur {
+				let off = if level > 0 { 1 } else { 0 };
+				self.indent.output(pos, &buf[cur..i + off], &mut push)?;
+				cur = i + off;
+			}
+
+			if level > 0 {
+				self.indent();
+			} else if level < 0 {
+				self.dedent();
+			}
+		}
+		self.indent.output(pos, &buf[cur..], &mut push)?;
+		Ok(())
+	}
+}
+
+/// Simple wrapper for a [`FilterWriter`] with an [`IndentFilter`].
 pub struct IndentWriter<T: std::io::Write> {
 	inner: FilterWriter<T, IndentFilter>,
 }
