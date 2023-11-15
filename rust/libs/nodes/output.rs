@@ -17,7 +17,7 @@ pub trait StreamFn: FnMut(&[u8]) -> StreamResult {}
 
 impl<T: FnMut(&[u8]) -> StreamResult> StreamFn for T {}
 
-trait StreamFilter: Clone {
+pub trait StreamFilter: Clone {
 	fn output<T: StreamFn>(&mut self, pos: &PosInfo, buf: &[u8], push: T) -> StreamResult;
 }
 
@@ -134,6 +134,22 @@ struct IndentFilter {
 	levels: usize,
 }
 
+impl IndentFilter {
+	pub fn new() -> Self {
+		Self::default()
+	}
+
+	pub fn indent(&mut self) {
+		self.levels += 1;
+	}
+
+	pub fn dedent(&mut self) {
+		if self.levels > 0 {
+			self.levels -= 1;
+		}
+	}
+}
+
 impl Default for IndentFilter {
 	fn default() -> Self {
 		Self {
@@ -168,7 +184,70 @@ impl StreamFilter for IndentFilter {
 	}
 }
 
-struct FilterWriter<T: std::io::Write, U: StreamFilter> {
+#[derive(Default, Clone)]
+pub struct FormatFilter {
+	indent: IndentFilter,
+	stack: Vec<char>,
+}
+
+impl FormatFilter {
+	pub fn new() -> Self {
+		Self::default()
+	}
+
+	fn get_matching(chr: char) -> Option<char> {
+		let chr = match chr {
+			'(' => ')',
+			'[' => ']',
+			'{' => '}',
+			'<' => '>',
+			_ => return None,
+		};
+		Some(chr)
+	}
+
+	fn indent(&mut self) {
+		self.indent.indent();
+	}
+
+	fn dedent(&mut self) {
+		self.indent.dedent();
+	}
+}
+
+impl StreamFilter for FormatFilter {
+	fn output<T: StreamFn>(&mut self, pos: &PosInfo, buf: &[u8], mut push: T) -> StreamResult {
+		let mut cur = 0;
+		for i in 0..buf.len() {
+			let chr = buf[i] as char;
+			let level = if let Some(paren) = Self::get_matching(chr) {
+				self.stack.push(paren);
+				1
+			} else if Some(&chr) == self.stack.last() {
+				self.stack.pop();
+				-1
+			} else {
+				0
+			};
+
+			if level != 0 && i > cur {
+				let off = if level > 0 { 1 } else { 0 };
+				self.indent.output(pos, &buf[cur..i + off], &mut push)?;
+				cur = i + off;
+			}
+
+			if level > 0 {
+				self.indent();
+			} else if level < 0 {
+				self.dedent();
+			}
+		}
+		self.indent.output(pos, &buf[cur..], &mut push)?;
+		Ok(())
+	}
+}
+
+pub struct FilterWriter<T: std::io::Write, U: StreamFilter> {
 	stream: Arc<Mutex<T>>,
 	filter: Arc<Mutex<U>>,
 	pos: Arc<PosInfo>,
@@ -270,11 +349,11 @@ impl<T: std::io::Write, U: StreamFilter> FilterWriter<T, U> {
 	}
 }
 
-struct PrettyWriter<T: std::io::Write> {
+pub struct IndentWriter<T: std::io::Write> {
 	inner: FilterWriter<T, IndentFilter>,
 }
 
-impl<T: std::io::Write> PrettyWriter<T> {
+impl<T: std::io::Write> IndentWriter<T> {
 	pub fn new(inner: T) -> Self {
 		let filter = IndentFilter::default();
 		Self {
@@ -283,21 +362,17 @@ impl<T: std::io::Write> PrettyWriter<T> {
 	}
 
 	pub fn indent(&self) -> Self {
-		let inner = self.inner.with_filter(|filter| filter.levels += 1);
+		let inner = self.inner.with_filter(|filter| filter.indent());
 		Self { inner }
 	}
 
 	pub fn dedent(&self) -> Self {
-		let inner = self.inner.with_filter(|filter| {
-			if filter.levels > 0 {
-				filter.levels -= 1;
-			}
-		});
+		let inner = self.inner.with_filter(|filter| filter.dedent());
 		Self { inner }
 	}
 }
 
-impl<T: std::io::Write> std::io::Write for PrettyWriter<T> {
+impl<T: std::io::Write> std::io::Write for IndentWriter<T> {
 	fn write(&mut self, buf: &[u8]) -> Result<usize> {
 		self.inner.output(buf)
 	}
@@ -307,7 +382,7 @@ impl<T: std::io::Write> std::io::Write for PrettyWriter<T> {
 	}
 }
 
-impl<T: std::io::Write> std::fmt::Write for PrettyWriter<T> {
+impl<T: std::io::Write> std::fmt::Write for IndentWriter<T> {
 	fn write_str(&mut self, s: &str) -> std::fmt::Result {
 		if let Err(_) = self.inner.output(s.as_bytes()) {
 			Err(std::fmt::Error)
@@ -322,7 +397,7 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn pretty_print() {
+	fn indent() {
 		let expected = [
 			"something {",
 			"    line 1a",
@@ -340,7 +415,7 @@ mod tests {
 		let expected = expected.join("\n");
 
 		let mut out = Buffer::new();
-		let mut writer = PrettyWriter::new(&mut out);
+		let mut writer = IndentWriter::new(&mut out);
 		write!(writer, "something {{\n");
 
 		{
@@ -374,6 +449,37 @@ mod tests {
 		// 	items: vec![v0, v1, v2, v3],
 		// };
 		// println!("The list is:\n    {list:?}");
+	}
+
+	#[test]
+	fn format() {
+		let input = "fn(\na1\na2 {\nb1\nb2(X)\nb3[ 1,\n[\n(\nA\n)\n], [\nB\nC\n]\nD\n]\n})\nend";
+		let expected = [
+			"fn(",
+			"    a1",
+			"    a2 {",
+			"        b1",
+			"        b2(X)",
+			"        b3[ 1,",
+			"            [",
+			"                (",
+			"                    A",
+			"                )",
+			"            ], [",
+			"                B",
+			"                C",
+			"            ]",
+			"            D",
+			"        ]",
+			"    })",
+			"end",
+		];
+		let expected = expected.join("\n");
+
+		let mut out = Buffer::new();
+		let mut writer = FilterWriter::new(&mut out, FormatFilter::new());
+		writer.output(input.as_bytes());
+		assert_eq!(expected, out.as_str());
 	}
 
 	#[derive(Copy, Clone, Debug)]
