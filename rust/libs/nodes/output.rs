@@ -1,9 +1,78 @@
 use std::{
-	fmt::{Display, Formatter, Write},
-	sync::{atomic::AtomicBool, Arc, Mutex},
+	fmt::{Debug, Display, Formatter, Write},
+	io::{Error, ErrorKind, Result},
+	sync::{
+		atomic::{AtomicBool, AtomicUsize, Ordering},
+		Arc, Mutex,
+	},
 };
 
-type StreamResult = std::result::Result<(), std::io::Error>;
+const CR: u8 = '\r' as u8;
+const LF: u8 = '\n' as u8;
+
+const SEQ: Ordering = Ordering::SeqCst;
+
+pub type StreamResult = Result<()>;
+pub trait StreamFn: FnMut(&[u8]) -> StreamResult {}
+
+impl<T: FnMut(&[u8]) -> StreamResult> StreamFn for T {}
+
+trait StreamFilter: Clone {
+	fn output<T: StreamFn>(&mut self, pos: &PosInfo, buf: &[u8], push: T) -> StreamResult;
+}
+
+#[derive(Default)]
+pub struct PosInfo {
+	row: AtomicUsize,
+	col: AtomicUsize,
+	was_cr: AtomicBool,
+}
+
+impl PosInfo {
+	pub fn new() -> Self {
+		Self::default()
+	}
+
+	pub fn row(&self) -> usize {
+		self.row.load(SEQ)
+	}
+
+	pub fn col(&self) -> usize {
+		self.col.load(SEQ)
+	}
+
+	pub fn is_new_line(&self) -> bool {
+		self.col() == 0 && self.row() > 0
+	}
+
+	pub fn advance(&self, buf: &[u8]) {
+		for &chr in buf {
+			let crlf = chr == LF && self.was_cr.load(SEQ);
+			if crlf {
+				self.was_cr.store(false, SEQ);
+				continue;
+			}
+
+			let is_cr = chr == CR;
+			let eol = chr == LF || is_cr;
+			self.was_cr.store(is_cr, SEQ);
+			if eol {
+				self.col.store(0, SEQ);
+				self.row.fetch_add(1, SEQ);
+			} else {
+				self.col.fetch_add(1, SEQ);
+			}
+		}
+	}
+}
+
+impl Debug for PosInfo {
+	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+		let row = self.row();
+		let col = self.col();
+		write!(f, "<@{row}:{col}>")
+	}
+}
 
 #[derive(Default, Clone)]
 pub struct Buffer {
@@ -25,19 +94,16 @@ impl Buffer {
 }
 
 impl std::io::Write for Buffer {
-	fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+	fn write(&mut self, buf: &[u8]) -> Result<usize> {
 		let str = match std::str::from_utf8(buf) {
 			Ok(str) => str,
-			Err(err) => Err(std::io::Error::new(
-				std::io::ErrorKind::Unsupported,
-				"non-utf8 data in buffer write",
-			))?,
+			Err(err) => Err(Error::new(ErrorKind::Unsupported, "non-utf8 data in buffer write"))?,
 		};
 		self.buffer.push_str(str);
 		Ok(buf.len())
 	}
 
-	fn flush(&mut self) -> std::io::Result<()> {
+	fn flush(&mut self) -> Result<()> {
 		Ok(())
 	}
 }
@@ -61,30 +127,11 @@ impl Display for Buffer {
 	}
 }
 
-trait StreamFilter: Clone {
-	fn output<T: FnMut(&[u8]) -> StreamResult>(&mut self, buf: &[u8], push: T) -> StreamResult;
-}
-
 #[derive(Clone)]
 struct IndentFilter {
 	prefix: Arc<String>,
 	indent: Arc<String>,
 	levels: usize,
-	at_start: Arc<AtomicBool>,
-}
-
-impl IndentFilter {
-	const SEQ: std::sync::atomic::Ordering = std::sync::atomic::Ordering::SeqCst;
-
-	fn handle_line_start(&self) -> bool {
-		let at_start = self.at_start.load(Self::SEQ);
-		self.at_start.store(false, Self::SEQ);
-		at_start
-	}
-
-	fn set_line_start(&self) {
-		self.at_start.store(true, Self::SEQ);
-	}
 }
 
 impl Default for IndentFilter {
@@ -93,25 +140,20 @@ impl Default for IndentFilter {
 			prefix: String::new().into(),
 			indent: "    ".to_string().into(),
 			levels: 0,
-			at_start: Default::default(),
 		}
 	}
 }
 
 impl StreamFilter for IndentFilter {
-	fn output<T: FnMut(&[u8]) -> StreamResult>(&mut self, mut buf: &[u8], mut push: T) -> StreamResult {
-		const CR: u8 = '\r' as u8;
-		const LF: u8 = '\n' as u8;
-
+	fn output<T: StreamFn>(&mut self, pos: &PosInfo, mut buf: &[u8], mut push: T) -> StreamResult {
 		while buf.len() > 0 {
 			let is_line_break = buf[0] == LF || buf[0] == CR;
 			if is_line_break {
 				let is_crlf = buf.len() > 1 && buf[0] == CR && buf[1] == LF;
 				push(&[LF])?;
 				buf = if is_crlf { &buf[2..] } else { &buf[1..] };
-				self.set_line_start();
 			} else {
-				if self.handle_line_start() {
+				if pos.is_new_line() {
 					push(self.prefix.as_bytes())?;
 					for i in 0..self.levels {
 						push(self.indent.as_bytes())?;
@@ -129,6 +171,7 @@ impl StreamFilter for IndentFilter {
 struct FilterWriter<T: std::io::Write, U: StreamFilter> {
 	stream: Arc<Mutex<T>>,
 	filter: Arc<Mutex<U>>,
+	pos: Arc<PosInfo>,
 }
 
 impl<T: std::io::Write, U: StreamFilter> FilterWriter<T, U> {
@@ -136,6 +179,7 @@ impl<T: std::io::Write, U: StreamFilter> FilterWriter<T, U> {
 		Self {
 			stream: Mutex::new(stream).into(),
 			filter: Mutex::new(filter).into(),
+			pos: Default::default(),
 		}
 	}
 
@@ -148,42 +192,47 @@ impl<T: std::io::Write, U: StreamFilter> FilterWriter<T, U> {
 		Self {
 			stream: self.stream.clone(),
 			filter: Mutex::new(filter).into(),
+			pos: self.pos.clone(),
 		}
 	}
 
-	pub fn flush(&mut self) -> std::io::Result<()> {
+	pub fn flush(&mut self) -> Result<()> {
 		self.stream.lock().unwrap().flush()
 	}
 
-	pub fn output(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+	pub fn output(&mut self, buf: &[u8]) -> Result<usize> {
 		let mut stream = self.stream.lock().unwrap();
 		let mut filter = self.filter.lock().unwrap();
 		let mut out_pos = 0;
 		let mut cur_pos = 0;
+		let pos = &self.pos;
 
 		let mut write = move |out: &[u8]| -> StreamResult {
+			pos.advance(out);
+
 			let ptr = out.as_ptr();
 			let cur = buf[cur_pos..].as_ptr();
 			if ptr == cur {
 				cur_pos += out.len();
-				Ok(())
 			} else {
 				let stream = &mut *stream;
 				if cur_pos > out_pos {
-					Self::write_all(stream, &buf[out_pos..cur_pos])?;
+					let out = &buf[out_pos..cur_pos];
+					Self::write_all(stream, out)?;
 					out_pos = cur_pos;
 				}
-				Self::write_all(stream, out)
+				Self::write_all(stream, out)?;
 			}
+			Ok(())
 		};
 
-		filter.output(buf, &mut write)?;
+		filter.output(&pos, buf, &mut write)?;
 		write(&[])?;
 
 		Ok(buf.len())
 	}
 
-	fn write_all(w: &mut T, mut buf: &[u8]) -> std::io::Result<()> {
+	fn write_all(w: &mut T, mut buf: &[u8]) -> Result<()> {
 		const MAX_TRIES: usize = 5;
 
 		use std::io::*;
@@ -249,11 +298,11 @@ impl<T: std::io::Write> PrettyWriter<T> {
 }
 
 impl<T: std::io::Write> std::io::Write for PrettyWriter<T> {
-	fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+	fn write(&mut self, buf: &[u8]) -> Result<usize> {
 		self.inner.output(buf)
 	}
 
-	fn flush(&mut self) -> std::io::Result<()> {
+	fn flush(&mut self) -> Result<()> {
 		self.inner.flush()
 	}
 }
@@ -310,7 +359,7 @@ mod tests {
 
 		write!(writer, "\n}}\n");
 
-		assert_eq!(out.as_str(), expected);
+		assert_eq!(expected, out.as_str());
 
 		// let p0 = Point { x: 0, y: 1 };
 		// let p1 = Point { x: 2, y: 3 };
