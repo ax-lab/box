@@ -1,11 +1,14 @@
 use std::{
 	fmt::{Debug, Display, Formatter, Write},
 	io::{Error, ErrorKind, Result},
+	slice::SliceIndex,
 	sync::{
 		atomic::{AtomicBool, AtomicUsize, Ordering},
 		Arc, Mutex,
 	},
 };
+
+use crate::Pretty;
 
 const CR: u8 = '\r' as u8;
 const LF: u8 = '\n' as u8;
@@ -23,6 +26,11 @@ impl<T: FnMut(&[u8]) -> StreamResult> StreamFn for T {}
 /// Trait for [`FilterWriter`] filters.
 pub trait StreamFilter: Clone {
 	fn output<T: StreamFn>(&mut self, pos: &PosInfo, buf: &[u8], push: T) -> StreamResult;
+
+	fn flush<T: StreamFn>(&mut self, pos: &PosInfo, push: T) -> StreamResult {
+		let _ = (pos, push);
+		Ok(())
+	}
 }
 
 pub struct FilterWriter<T: std::io::Write, U: StreamFilter> {
@@ -54,10 +62,15 @@ impl<T: std::io::Write, U: StreamFilter> FilterWriter<T, U> {
 	}
 
 	pub fn flush(&mut self) -> Result<()> {
-		self.stream.lock().unwrap().flush()
+		self.do_output(&[], true)?;
+		Ok(())
 	}
 
 	pub fn output(&mut self, buf: &[u8]) -> Result<usize> {
+		self.do_output(buf, false)
+	}
+
+	fn do_output(&mut self, buf: &[u8], flush: bool) -> Result<usize> {
 		let mut stream = self.stream.lock().unwrap();
 		let mut filter = self.filter.lock().unwrap();
 		let mut out_pos = 0;
@@ -84,7 +97,11 @@ impl<T: std::io::Write, U: StreamFilter> FilterWriter<T, U> {
 		};
 
 		filter.output(&pos, buf, &mut write)?;
-		write(&[])?;
+		write(&[])?; // flush the `ptr == cur` buffer above
+
+		if flush {
+			filter.flush(&pos, &mut write)?;
+		}
 
 		Ok(buf.len())
 	}
@@ -124,6 +141,25 @@ impl<T: std::io::Write, U: StreamFilter> FilterWriter<T, U> {
 			};
 		}
 		Ok(())
+	}
+}
+
+impl<T: std::io::Write, U: StreamFilter> std::io::Write for FilterWriter<T, U> {
+	fn write(&mut self, buf: &[u8]) -> Result<usize> {
+		self.output(buf)
+	}
+
+	fn flush(&mut self) -> Result<()> {
+		self.flush()
+	}
+}
+
+impl<T: std::io::Write, U: StreamFilter> std::fmt::Write for FilterWriter<T, U> {
+	fn write_str(&mut self, s: &str) -> std::fmt::Result {
+		match self.output(s.as_bytes()) {
+			Ok(..) => Ok(()),
+			Err(..) => Err(std::fmt::Error),
+		}
 	}
 }
 
@@ -310,7 +346,6 @@ impl FormatFilter {
 			'(' => ')',
 			'[' => ']',
 			'{' => '}',
-			'<' => '>',
 			_ => return None,
 		};
 		Some(chr)
@@ -401,9 +436,134 @@ impl<T: std::io::Write> std::fmt::Write for IndentWriter<T> {
 	}
 }
 
+#[derive(Default, Clone)]
+pub struct PrettyFilter {
+	pretty: Pretty,
+	buffer: Buffer,
+}
+
+impl PrettyFilter {
+	pub fn new(pretty: Pretty) -> Self {
+		Self {
+			pretty,
+			buffer: Buffer::new(),
+		}
+	}
+}
+
+impl StreamFilter for PrettyFilter {
+	fn output<T: StreamFn>(&mut self, pos: &PosInfo, buf: &[u8], push: T) -> StreamResult {
+		use std::io::Write;
+		self.buffer.write(buf)?;
+		Ok(())
+	}
+
+	fn flush<T: StreamFn>(&mut self, pos: &PosInfo, mut push: T) -> StreamResult {
+		let str = self.buffer.as_str();
+		let str = self.pretty.print(str);
+		push(str.as_bytes())
+	}
+}
+
+enum Split {
+	None,
+	Before,
+	After,
+	Around,
+	End,
+}
+
+fn split_with<F: FnMut(char) -> Split>(input: &str, mut f: F) -> SplitWith<F> {
+	SplitWith::new(input, f)
+}
+
+struct SplitWith<'a, F: FnMut(char) -> Split> {
+	pred: F,
+	text: &'a str,
+	next: Option<&'a str>,
+}
+
+impl<'a, F: FnMut(char) -> Split> SplitWith<'a, F> {
+	pub fn new(text: &'a str, pred: F) -> Self {
+		Self {
+			pred,
+			text: text.as_ref(),
+			next: None,
+		}
+	}
+}
+
+impl<'a, F: FnMut(char) -> Split> Iterator for SplitWith<'a, F> {
+	type Item = &'a str;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		if let Some(next) = self.next.take() {
+			self.text = &self.text[next.len()..];
+			return Some(next);
+		}
+
+		let text = self.text;
+		for (pos, chr) in text.char_indices() {
+			let pos = match (self.pred)(chr) {
+				Split::None => continue,
+				Split::Before => pos,
+				Split::After => pos + chr.len_utf8(),
+				Split::Around => {
+					let sta = pos;
+					let end = pos + chr.len_utf8();
+					if sta > 0 {
+						self.next = Some(&text[sta..end]);
+						sta
+					} else {
+						end
+					}
+				}
+				Split::End => break,
+			};
+			if pos > 0 {
+				let str = &text[..pos];
+				self.text = &text[pos..];
+				return Some(str);
+			}
+		}
+
+		if text.len() > 0 {
+			self.text = "";
+			Some(text)
+		} else {
+			None
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn formatting() {
+		let mut output = Buffer::new();
+		let pretty = Pretty::with_width(10);
+		let pretty = PrettyFilter::new(pretty);
+		let mut writer = FilterWriter::new(&mut output, pretty);
+		write!(writer, "abc(123)\n123\n[1,2,3,4,5,6,7,8,9]");
+		writer.flush();
+		println!("\n{output}\n");
+	}
+
+	#[test]
+	fn split() {
+		let input = "|abc(123,34|5,789)!!!";
+		let output = split_with(input, |chr| match chr {
+			'(' => Split::After,
+			')' => Split::Around,
+			',' => Split::After,
+			'|' => Split::Before,
+			_ => Split::None,
+		})
+		.collect::<Vec<_>>();
+		assert_eq!(output, ["|abc(", "123,", "34", "|5,", "789", ")", "!!!"]);
+	}
 
 	#[test]
 	fn indent() {

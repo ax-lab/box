@@ -88,6 +88,7 @@ pub use code::*;
 pub use expr::*;
 pub use nodes::*;
 pub use output::*;
+pub use pretty::*;
 pub use program::*;
 pub use result::*;
 pub use span::*;
