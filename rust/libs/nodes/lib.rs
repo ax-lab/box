@@ -75,6 +75,7 @@ pub mod expr;
 pub mod nodes;
 pub mod op;
 pub mod output;
+pub mod pretty;
 pub mod program;
 pub mod result;
 pub mod span;
