@@ -7,11 +7,12 @@ publish = false
 
 default-run = "bit"
 
+[lib]
+name = "bit"
+path = "lib.rs"
+
 [[bin]]
 name = "bit"
 path = "bit.rs"
 
 [dependencies]
-
-input = { path = "../libs/input" }
-result = { path = "../libs/result" }

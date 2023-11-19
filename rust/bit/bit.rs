@@ -1,14 +1,4 @@
-pub mod code;
-pub mod pretty;
-pub mod result;
-pub mod store;
-pub mod symbols;
-
-pub use code::*;
-pub use pretty::*;
-pub use result::*;
-pub use store::*;
-pub use symbols::*;
+use bit::*;
 
 fn main() {
 	if let Err(err) = run() {
@@ -17,6 +7,15 @@ fn main() {
 }
 
 fn run() -> Result<()> {
+	let store = Store::new();
+	store.add_loader(FileLoader::new(".")?);
+
+	for arg in std::env::args().skip(1) {
+		let src = store.load_source(arg)?;
+		println!("\n## {} ({} bytes) ##", src.name(), src.len());
+		println!("\n | {}\n", indent_with(src.text(), " | "));
+	}
+
 	let code = r#"
 		let x = 10
 		let y = 4

@@ -1,7 +1,11 @@
-use std::fmt::{Debug, Display, Formatter};
+use std::{
+	fmt::{Debug, Display, Formatter},
+	sync::Arc,
+};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+#[derive(Clone)]
 pub struct Error {
 	info: ErrorInfo,
 }
@@ -9,7 +13,7 @@ pub struct Error {
 impl Error {
 	pub fn from<T: std::error::Error + 'static>(error: T) -> Self {
 		Self {
-			info: ErrorInfo::Custom(Box::new(error)),
+			info: ErrorInfo::Custom(Arc::new(error)),
 		}
 	}
 
@@ -26,10 +30,11 @@ impl Error {
 	}
 }
 
+#[derive(Clone)]
 enum ErrorInfo {
 	String(String),
 	Static(&'static str),
-	Custom(Box<dyn std::error::Error>),
+	Custom(Arc<dyn std::error::Error>),
 }
 
 impl Display for Error {

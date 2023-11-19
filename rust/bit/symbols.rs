@@ -5,7 +5,7 @@ use std::{
 	sync::RwLock,
 };
 
-use super::Store;
+use super::*;
 
 /// Wrapper for an immutable string backed by a [`Store`].
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
@@ -79,7 +79,7 @@ impl Store {
 
 /// Store backend data for [`Sym`].
 #[derive(Default)]
-pub struct SymbolStore {
+pub(crate) struct SymbolStore {
 	set: RwLock<HashSet<Box<str>>>,
 }
 

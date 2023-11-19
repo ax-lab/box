@@ -6,11 +6,12 @@ use std::{
 	},
 };
 
-use super::SymbolStore;
+use super::*;
 
 #[derive(Default)]
 pub struct Store {
 	pub(crate) symbols: SymbolStore,
+	pub(crate) sources: SourceStore,
 	arena: StoreArena,
 }
 
