@@ -1,7 +1,14 @@
-use std::sync::Arc;
+pub mod code;
+pub mod pretty;
+pub mod result;
+pub mod store;
+pub mod symbols;
 
-use input::*;
-use result::*;
+pub use code::*;
+pub use pretty::*;
+pub use result::*;
+pub use store::*;
+pub use symbols::*;
 
 fn main() {
 	if let Err(err) = run() {
@@ -10,59 +17,19 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-	for it in std::env::args().skip(1) {
-		let src = Source::load_file(it, ".")?;
-		print!(">>> `{}`", src.name(),);
-		if let Some(path) = src.path() {
-			print!(" at {}", path.to_string_lossy());
-		}
-		println!("\n");
-		println!("{}■\n", src.text());
-	}
-
-	if false {
-		let a1 = SourceCode("print 'hello world'");
-		let a2 = Raw(vec![Token::Symbol("print"), Token::Literal("hello world")]);
-		let a3 = Print(Arc::new(SourceCode("`hello world`")));
-		let a4 = Print(Arc::new(Raw(vec![Token::Literal("hello world")])));
-		let a5 = Print(Arc::new(Token::Literal("hello world")));
-
-		let target = Code::Print(Code::Literal("hello world").into());
-		assert_eq!(target, eval(a1));
-		assert_eq!(target, eval(a2));
-		assert_eq!(target, eval(a3));
-		assert_eq!(target, eval(a4));
-		assert_eq!(target, eval(a5));
-	}
+	let code = r#"
+		let x = 10
+		let y = 4
+		let z = 2
+		let ans = x * y + z
+		print 'The answer to life, the universe, and everything is', ans
+	"#;
+	let code = text(code);
+	println!();
+	println!("■■■");
+	println!("{code}");
+	println!("■■■");
+	println!();
 
 	Ok(())
-}
-
-pub trait IsExpr {}
-
-pub struct SourceCode(&'static str);
-
-pub enum Token {
-	Symbol(&'static str),
-	Literal(&'static str),
-}
-
-pub struct Raw(Vec<Token>);
-
-pub struct Print(Arc<dyn IsExpr>);
-
-impl IsExpr for SourceCode {}
-impl IsExpr for Token {}
-impl IsExpr for Raw {}
-impl IsExpr for Print {}
-
-#[derive(Debug, Eq, PartialEq)]
-pub enum Code {
-	Literal(&'static str),
-	Print(Arc<Code>),
-}
-
-pub fn eval<T: IsExpr>(input: T) -> Code {
-	let _ = input;
-	todo!()
 }
