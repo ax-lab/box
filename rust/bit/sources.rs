@@ -43,6 +43,10 @@ impl<'a> Source<'a> {
 	pub fn len(&self) -> usize {
 		self.text().len()
 	}
+
+	pub fn span(&self) -> Span<'a> {
+		Span::from_src(*self)
+	}
 }
 
 impl<'a> Default for Source<'a> {
