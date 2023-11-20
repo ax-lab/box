@@ -13,13 +13,99 @@ pub trait Grammar: Clone + Default {
 #[derive(Clone, Default)]
 pub struct BasicGrammar;
 
+impl BasicGrammar {
+	fn id(c: char, mid: bool) -> bool {
+		match c {
+			'a'..='z' => true,
+			'A'..='Z' => true,
+			'_' => true,
+			'0'..='9' => mid,
+			_ => false,
+		}
+	}
+
+	fn is_digit(c: char) -> bool {
+		c >= '0' && c <= '9'
+	}
+
+	fn alpha_num(text: &str) -> usize {
+		for (pos, char) in text.char_indices() {
+			if !Self::id(char, true) {
+				return pos;
+			}
+		}
+		text.len()
+	}
+
+	fn digits(text: &str) -> usize {
+		for (pos, char) in text.char_indices() {
+			if !Self::is_digit(char) && char != '_' {
+				return pos;
+			}
+		}
+		text.len()
+	}
+}
+
 impl Grammar for BasicGrammar {
 	fn is_space(&self, c: char) -> bool {
 		c == ' ' || c == '\t'
 	}
 
-	fn match_next<'a>(&self, _text: &'a str) -> Option<(TokenKind<'a>, usize)> {
-		None
+	fn match_next<'a>(&self, text: &'a str) -> Option<(TokenKind<'a>, usize)> {
+		let next = text.chars().next().unwrap();
+		if Self::is_digit(next) {
+			let len = Self::digits(text);
+			let (len, flt) = if text[len..].starts_with(".") {
+				let pos = len + 1;
+				let flt_len = Self::digits(&text[pos..]);
+				if flt_len > 0 {
+					let flt_len = flt_len + Self::digits(&text[pos + flt_len..]);
+					(pos + flt_len, true)
+				} else {
+					(len, false)
+				}
+			} else {
+				(len, false)
+			};
+			let rest = &text[len..];
+			let (len, flt) = if let Some('e' | 'E') = rest.chars().next() {
+				let (exp_len, rest) = (len + 1, &rest[1..]);
+				let (exp_len, rest) = if let Some('+' | '-') = rest.chars().next() {
+					(exp_len + 1, &rest[1..])
+				} else {
+					(exp_len, rest)
+				};
+				let len = Self::digits(rest);
+				if len > 0 {
+					(exp_len + len, true)
+				} else {
+					(len, flt)
+				}
+			} else {
+				(len, flt)
+			};
+			let len = len + Self::alpha_num(&text[len..]);
+			let kind = if flt { TokenKind::Float } else { TokenKind::Integer };
+			Some((kind, len))
+		} else {
+			let mut word_len = 0;
+			for (pos, char) in text.char_indices() {
+				if !Self::id(char, pos > 0) {
+					word_len = pos;
+					break;
+				} else {
+					word_len = text.len();
+				}
+			}
+
+			if word_len > 0 {
+				let word = &text[..word_len];
+				Some((TokenKind::Word(word), word_len))
+			} else {
+				None
+			}
+		}
 	}
 }
 
@@ -35,10 +121,10 @@ pub enum TokenKind<'a> {
 	Break,
 	Symbol(&'a str),
 	Word(&'a str),
-	Comment,
-	String,
 	Integer,
 	Float,
+	String,
+	Comment,
 }
 
 #[derive(Copy, Clone, Default, Debug, Eq, PartialEq)]
@@ -251,14 +337,89 @@ mod tests {
 		)
 	}
 
-	fn tokenize<'a>(mut span: Span<'a>) -> Vec<TokenKind<'a>> {
+	#[test]
+	fn words() {
+		let store = Store::new();
+		let input = store.load_string("test", "a ab abc a1 a2 _ __ _a _0 abc_123");
+		let result = tokenize(input.span());
+
+		assert_eq!(
+			result,
+			[
+				TokenKind::Word("a"),
+				TokenKind::Word("ab"),
+				TokenKind::Word("abc"),
+				TokenKind::Word("a1"),
+				TokenKind::Word("a2"),
+				TokenKind::Word("_"),
+				TokenKind::Word("__"),
+				TokenKind::Word("_a"),
+				TokenKind::Word("_0"),
+				TokenKind::Word("abc_123"),
+			]
+		)
+	}
+
+	#[test]
+	fn numbers() {
+		let store = Store::new();
+		let input = store.load_string(
+			"test",
+			[
+				"0 123",
+				"1.2 3.45 10e1 10E20",
+				"1e+23 1E-23 1.45e2 1.23E-45",
+				"1_000_000_.56_78_e+1_2_3_",
+				"1abc 1.0abc 1e1abc 1.0e+1abc 1eee",
+				"1.abc",
+			]
+			.join("\n"),
+		);
+		let result = tokenize_str(input.span());
+
+		assert_eq!(
+			result,
+			[
+				(TokenKind::Integer, "0"),
+				(TokenKind::Integer, "123"),
+				(TokenKind::Break, "\n"),
+				(TokenKind::Float, "1.2"),
+				(TokenKind::Float, "3.45"),
+				(TokenKind::Float, "10e1"),
+				(TokenKind::Float, "10E20"),
+				(TokenKind::Break, "\n"),
+				(TokenKind::Float, "1e+23"),
+				(TokenKind::Float, "1E-23"),
+				(TokenKind::Float, "1.45e2"),
+				(TokenKind::Float, "1.23E-45"),
+				(TokenKind::Break, "\n"),
+				(TokenKind::Float, "1_000_000_.56_78_e+1_2_3_"),
+				(TokenKind::Break, "\n"),
+				(TokenKind::Integer, "1abc"),
+				(TokenKind::Float, "1.0abc"),
+				(TokenKind::Float, "1e1abc"),
+				(TokenKind::Float, "1.0e+1abc"),
+				(TokenKind::Integer, "1eee"),
+				(TokenKind::Break, "\n"),
+				(TokenKind::Integer, "1"),
+				(TokenKind::Symbol("."), "."),
+				(TokenKind::Word("abc"), "abc"),
+			]
+		)
+	}
+
+	fn tokenize<'a>(span: Span<'a>) -> Vec<TokenKind<'a>> {
+		tokenize_str(span).into_iter().map(|x| x.0).collect()
+	}
+
+	fn tokenize_str<'a>(mut span: Span<'a>) -> Vec<(TokenKind<'a>, &'a str)> {
 		let mut lexer = Lexer::new(BasicGrammar);
-		lexer.add_symbols(["+", "++", "-", "--", "<", "<<", "<<<", "=", "==", ","]);
+		lexer.add_symbols(["+", "++", "-", "--", "<", "<<", "<<<", "=", "==", ",", "."]);
 
 		let mut pos = Pos::default();
 		let out = lexer.tokenize(&mut span, &mut pos);
 		assert!(span.len() == 0, "failed to parse: {:?}", span.text());
-		let out = out.into_iter().map(|x| x.kind);
+		let out = out.into_iter().map(|x| (x.kind, x.span.text()));
 		out.collect()
 	}
 }
