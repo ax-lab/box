@@ -1,5 +1,15 @@
 use super::*;
 
+pub trait Tokenizer: Clone + Default {
+	fn tokenize<'a>(&mut self, span: &mut Span<'a>, pos: &mut Pos) -> Vec<Token<'a>>;
+}
+
+pub trait Grammar: Clone + Default {
+	fn is_space(c: char) -> bool;
+
+	fn match_next<'a>(&self, text: &'a str) -> Option<(TokenKind<'a>, usize)>;
+}
+
 pub struct Token<'a> {
 	pub kind: TokenKind<'a>,
 	pub span: Span<'a>,
@@ -25,14 +35,28 @@ pub struct Pos {
 	indent: usize,
 }
 
-pub trait Tokenizer: Clone + Default {
-	fn tokenize<'a>(&mut self, span: &mut Span<'a>, pos: &mut Pos) -> Vec<Token<'a>>;
-}
+impl Pos {
+	pub fn advance<T: Grammar>(&mut self, text: &str) {
+		let mut was_cr = false;
+		for char in text.chars() {
+			if char == '\r' || char == '\n' {
+				if !was_cr || char != '\n' {
+					self.line += 1;
+					self.column = 0;
+					self.indent = 0;
+				}
+				was_cr = char == '\r';
+			} else {
+				was_cr = false;
 
-pub trait Grammar: Clone + Default {
-	fn is_space(&self, c: char) -> bool;
-
-	fn match_next<'a>(&self, text: &'a str) -> Option<(TokenKind<'a>, usize)>;
+				let indent = self.indent == self.column && T::is_space(char);
+				self.column += 1;
+				if indent {
+					self.indent = self.column;
+				}
+			}
+		}
+	}
 }
 
 #[derive(Clone, Default)]
@@ -73,7 +97,7 @@ impl BasicGrammar {
 }
 
 impl Grammar for BasicGrammar {
-	fn is_space(&self, c: char) -> bool {
+	fn is_space(c: char) -> bool {
 		c == ' ' || c == '\t'
 	}
 
@@ -191,7 +215,7 @@ impl<T: Grammar> Lexer<T> {
 
 			let mut skip_spaces = text.len();
 			for (pos, chr) in text.char_indices() {
-				if !self.grammar.is_space(chr) {
+				if !T::is_space(chr) {
 					skip_spaces = pos;
 					break;
 				}
@@ -225,26 +249,7 @@ impl<T: Grammar> Lexer<T> {
 	}
 
 	fn advance(&self, span: &mut Span, pos: &mut Pos, len: usize) {
-		let mut was_cr = false;
-		for char in span.range(..len).chars() {
-			if char == '\r' || char == '\n' {
-				if !was_cr || char != '\n' {
-					pos.line += 1;
-					pos.column = 0;
-					pos.indent = 0;
-				}
-				was_cr = char == '\r';
-			} else {
-				was_cr = false;
-
-				let indent = pos.indent == pos.column && self.grammar.is_space(char);
-				pos.column += 1;
-				if indent {
-					pos.indent = pos.column;
-				}
-			}
-		}
-
+		pos.advance::<T>(span.range(..len));
 		*span = span.slice(len..);
 	}
 }
