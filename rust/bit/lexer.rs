@@ -1,5 +1,30 @@
 use super::*;
 
+pub struct Token<'a> {
+	pub kind: TokenKind<'a>,
+	pub span: Span<'a>,
+	pub pos: Pos,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub enum TokenKind<'a> {
+	None,
+	Break,
+	Symbol(&'a str),
+	Word(&'a str),
+	Integer,
+	Float,
+	Literal,
+	Comment,
+}
+
+#[derive(Copy, Clone, Default, Debug, Eq, PartialEq)]
+pub struct Pos {
+	line: usize,
+	column: usize,
+	indent: usize,
+}
+
 pub trait Tokenizer: Clone + Default {
 	fn tokenize<'a>(&mut self, span: &mut Span<'a>, pos: &mut Pos) -> Vec<Token<'a>>;
 }
@@ -54,7 +79,33 @@ impl Grammar for BasicGrammar {
 
 	fn match_next<'a>(&self, text: &'a str) -> Option<(TokenKind<'a>, usize)> {
 		let next = text.chars().next().unwrap();
-		if Self::is_digit(next) {
+		if next == '#' {
+			let mut len = text.len();
+			for (pos, chr) in text.char_indices() {
+				if chr == '\n' || chr == '\r' {
+					len = pos;
+					break;
+				}
+			}
+			Some((TokenKind::Comment, len))
+		} else if next == '\'' || next == '"' {
+			let quote = next;
+			let can_escape = true;
+			let mut escape = false;
+			let mut len = text.len();
+			for (pos, chr) in text.char_indices() {
+				if chr == quote && pos > 0 && !escape {
+					len = pos + chr.len_utf8();
+					break;
+				}
+				if escape {
+					escape = false;
+				} else if can_escape && chr == '\\' {
+					escape = true;
+				}
+			}
+			Some((TokenKind::Literal, len))
+		} else if Self::is_digit(next) {
 			let len = Self::digits(text);
 			let (len, flt) = if text[len..].starts_with(".") {
 				let pos = len + 1;
@@ -107,31 +158,6 @@ impl Grammar for BasicGrammar {
 			}
 		}
 	}
-}
-
-pub struct Token<'a> {
-	pub kind: TokenKind<'a>,
-	pub span: Span<'a>,
-	pub pos: Pos,
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub enum TokenKind<'a> {
-	None,
-	Break,
-	Symbol(&'a str),
-	Word(&'a str),
-	Integer,
-	Float,
-	String,
-	Comment,
-}
-
-#[derive(Copy, Clone, Default, Debug, Eq, PartialEq)]
-pub struct Pos {
-	line: usize,
-	column: usize,
-	indent: usize,
 }
 
 #[derive(Clone, Default)]
@@ -404,6 +430,84 @@ mod tests {
 				(TokenKind::Integer, "1"),
 				(TokenKind::Symbol("."), "."),
 				(TokenKind::Word("abc"), "abc"),
+			]
+		)
+	}
+
+	#[test]
+	fn comments() {
+		let store = Store::new();
+		let input = store.load_string(
+			"test",
+			["# simple comment", "1# C1\r2# C2", "3# C3\r\n4# C4", "#"].join("\n"),
+		);
+		let result = tokenize_str(input.span());
+
+		assert_eq!(
+			result,
+			[
+				(TokenKind::Comment, "# simple comment"),
+				(TokenKind::Break, "\n"),
+				(TokenKind::Integer, "1"),
+				(TokenKind::Comment, "# C1"),
+				(TokenKind::Break, "\r"),
+				(TokenKind::Integer, "2"),
+				(TokenKind::Comment, "# C2"),
+				(TokenKind::Break, "\n"),
+				(TokenKind::Integer, "3"),
+				(TokenKind::Comment, "# C3"),
+				(TokenKind::Break, "\r\n"),
+				(TokenKind::Integer, "4"),
+				(TokenKind::Comment, "# C4"),
+				(TokenKind::Break, "\n"),
+				(TokenKind::Comment, "#"),
+			]
+		)
+	}
+
+	#[test]
+	fn strings() {
+		let store = Store::new();
+		let input = store.load_string(
+			"test",
+			[
+				r#"'' 'hello world'"#,
+				r#"'a''b''c'"#,
+				r#"'abc\'def'"#,
+				r#"'\\\''"#,
+				r#""" "hello world""#,
+				r#""a""b""c""#,
+				r#""abc\"def""#,
+				r#""\\\"""#,
+			]
+			.join("\n"),
+		);
+
+		let result = tokenize_str(input.span());
+		assert_eq!(
+			result,
+			[
+				(TokenKind::Literal, r#"''"#),
+				(TokenKind::Literal, r#"'hello world'"#),
+				(TokenKind::Break, "\n"),
+				(TokenKind::Literal, r#"'a'"#),
+				(TokenKind::Literal, r#"'b'"#),
+				(TokenKind::Literal, r#"'c'"#),
+				(TokenKind::Break, "\n"),
+				(TokenKind::Literal, r#"'abc\'def'"#),
+				(TokenKind::Break, "\n"),
+				(TokenKind::Literal, r#"'\\\''"#),
+				(TokenKind::Break, "\n"),
+				(TokenKind::Literal, r#""""#),
+				(TokenKind::Literal, r#""hello world""#),
+				(TokenKind::Break, "\n"),
+				(TokenKind::Literal, r#""a""#),
+				(TokenKind::Literal, r#""b""#),
+				(TokenKind::Literal, r#""c""#),
+				(TokenKind::Break, "\n"),
+				(TokenKind::Literal, r#""abc\"def""#),
+				(TokenKind::Break, "\n"),
+				(TokenKind::Literal, r#""\\\"""#),
 			]
 		)
 	}
