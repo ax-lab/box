@@ -1,3 +1,5 @@
+use std::fmt::{Debug, Display, Formatter};
+
 use super::*;
 
 pub trait Tokenizer: Clone + Default {
@@ -14,6 +16,14 @@ pub struct Token<'a> {
 	pub kind: TokenKind<'a>,
 	pub span: Span<'a>,
 	pub pos: Pos,
+}
+
+impl<'a> Debug for Token<'a> {
+	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+		let kind = self.kind;
+		let span = self.span;
+		write!(f, "{kind:?} @{span}")
+	}
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -36,6 +46,10 @@ pub struct Pos {
 }
 
 impl Pos {
+	pub fn start() -> Self {
+		Self::default()
+	}
+
 	pub fn advance<T: Grammar>(&mut self, text: &str) {
 		let mut was_cr = false;
 		for char in text.chars() {
@@ -56,6 +70,14 @@ impl Pos {
 				}
 			}
 		}
+	}
+}
+
+impl Display for Pos {
+	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+		let line = self.line + 1;
+		let column = self.column + 1;
+		write!(f, "{line}:{column}")
 	}
 }
 

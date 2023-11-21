@@ -1,5 +1,5 @@
 use std::{
-	fmt::{Debug, Formatter},
+	fmt::{Debug, Display, Formatter},
 	ops::RangeBounds,
 };
 
@@ -94,11 +94,17 @@ impl<'a> Span<'a> {
 	}
 }
 
-impl<'a> Debug for Span<'a> {
-	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+impl<'a> Display for Span<'a> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		let src = self.src().name();
 		let pos = self.sta();
 		let len = self.len();
-		write!(f, "<{src} @{pos}+{len}>")
+		write!(f, "{src}:{pos}+{len}")
+	}
+}
+
+impl<'a> Debug for Span<'a> {
+	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+		write!(f, "<span {self}>")
 	}
 }

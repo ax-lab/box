@@ -10,10 +10,14 @@ fn run() -> Result<()> {
 	let store = Store::new();
 	store.add_loader(FileLoader::new(".")?);
 
+	let mut lexer = Lexer::new(BasicGrammar);
+	lexer.add_symbols([
+		"@", "&", "`", "!", "?", "+", "-", "*", "/", "=", ":", ".", ",", ";", "(", ")", "[", "]", "{", "}", "<", ">",
+	]);
+
 	for arg in std::env::args().skip(1) {
 		let src = store.load_source(arg)?;
-		println!("\n## {} ({} bytes) ##", src.name(), src.len());
-		println!("\n | {}\n", indent_with(src.text(), " | "));
+		show_tokens(&mut lexer, src)?;
 	}
 
 	let code = r#"
@@ -24,10 +28,30 @@ fn run() -> Result<()> {
 		print 'The answer to life, the universe, and everything is', ans
 	"#;
 	let code = text(code);
+
+	let store = Store::new();
+	let source = store.load_string("eval", code);
+	show_tokens(&mut lexer, source)?;
+
+	Ok(())
+}
+
+fn show_tokens<T: Grammar>(lexer: &mut Lexer<T>, src: Source) -> Result<()> {
+	let mut input = src.span();
+	let mut pos = Pos::start();
+	let tokens = lexer.tokenize(&mut input, &mut pos);
+
+	if input.len() > 0 {
+		let line = input.text().lines().next().unwrap();
+		let name = src.name();
+		Err(format!("failed to parse input: `{line}`\n    (at {name}:{pos})"))?;
+	}
+
+	println!("\n■■■ {} ({} bytes) ■■■", src.name(), src.len());
 	println!();
-	println!("■■■");
-	println!("{code}");
-	println!("■■■");
+	for token in tokens {
+		println!("- {token:?}");
+	}
 	println!();
 
 	Ok(())
