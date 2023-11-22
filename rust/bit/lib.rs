@@ -1,4 +1,5 @@
 pub mod code;
+pub mod int;
 pub mod lexer;
 pub mod pretty;
 pub mod result;
