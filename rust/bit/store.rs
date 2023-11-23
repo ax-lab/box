@@ -10,7 +10,7 @@ use super::*;
 
 #[derive(Default)]
 pub struct Store {
-	pub(crate) symbols: SymbolStore,
+	pub(crate) strings: StringStore<'static>,
 	pub(crate) sources: SourceStore,
 	arena: StoreArena,
 }

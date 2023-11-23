@@ -7,7 +7,7 @@ pub mod result;
 pub mod sources;
 pub mod span;
 pub mod store;
-pub mod symbols;
+pub mod strings;
 
 pub use code::*;
 pub use lexer::*;
@@ -17,4 +17,4 @@ pub use result::*;
 pub use sources::*;
 pub use span::*;
 pub use store::*;
-pub use symbols::*;
+pub use strings::*;

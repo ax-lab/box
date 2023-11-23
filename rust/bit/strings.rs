@@ -1,40 +1,35 @@
 use std::{
 	collections::HashSet,
 	fmt::{Debug, Display, Formatter},
-	marker::PhantomData,
+	hash::Hash,
 	sync::RwLock,
 };
 
 use super::*;
 
 /// Wrapper for an immutable string backed by a [`Store`].
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Ord, PartialOrd)]
 pub struct Sym<'a> {
-	data: *const str,
-	tag: PhantomData<&'a str>,
+	str: &'a str,
 }
 
 impl<'a> Sym<'a> {
-	pub const fn empty() -> Self {
-		Self {
-			data: "",
-			tag: PhantomData,
-		}
+	pub fn as_str(&self) -> &'a str {
+		self.str
 	}
 
-	pub fn as_str(&self) -> &'a str {
-		// safety: data is immutable and valid for the store's lifetime 'a
-		unsafe { &*self.data }
+	pub fn as_ptr(&self) -> *const () {
+		self.str.as_ptr() as *const ()
 	}
 
 	pub fn len(&self) -> usize {
-		self.as_str().len()
+		self.str.len()
 	}
 }
 
 impl<'a> Debug for Sym<'a> {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-		write!(f, "{:?}", self.as_str())
+		write!(f, "`{:?}", self.as_str())
 	}
 }
 
@@ -44,20 +39,17 @@ impl<'a> Display for Sym<'a> {
 	}
 }
 
-impl<'a> Ord for Sym<'a> {
-	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-		// use pointer comparison for equality
-		if self == other {
-			std::cmp::Ordering::Equal
-		} else {
-			self.as_str().cmp(other.as_str())
-		}
+impl<'a> Eq for Sym<'a> {}
+
+impl<'a> PartialEq for Sym<'a> {
+	fn eq(&self, other: &Self) -> bool {
+		self.as_ptr() == other.as_ptr()
 	}
 }
 
-impl<'a> PartialOrd for Sym<'a> {
-	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-		Some(self.cmp(other))
+impl<'a> Hash for Sym<'a> {
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+		self.as_ptr().hash(state);
 	}
 }
 
@@ -73,46 +65,44 @@ unsafe impl<'a> Sync for Sym<'a> {}
 
 impl Store {
 	pub fn sym<T: AsRef<str>>(&self, str: T) -> Sym {
-		self.symbols.from_str(str)
+		let str = self.intern(str);
+		Sym { str }
 	}
-}
 
-/// Store backend data for [`Sym`].
-#[derive(Default)]
-pub(crate) struct SymbolStore {
-	set: RwLock<HashSet<Box<str>>>,
-}
-
-impl SymbolStore {
-	fn from_str<T: AsRef<str>>(&self, str: T) -> Sym {
+	pub fn intern<'a, T: AsRef<str>>(&'a self, str: T) -> &'a str {
 		let str = str.as_ref();
-		if str.len() == 0 {
-			return Sym::empty();
-		}
 
-		let tag = PhantomData;
+		// SAFETY: the lifetime of the StringStore is the same as self
+		let strings: &StringStore<'a> = unsafe { std::mem::transmute(&self.strings) };
 
 		// fast path for existing strings
-		let set = self.set.read().unwrap();
+		let set = strings.set.read().unwrap();
 		if let Some(str) = set.get(str) {
-			let data = Box::as_ref(str) as *const _;
-			return Sym { data, tag };
+			return str;
 		}
 		drop(set);
 
 		// create a new string
-		let mut set = self.set.write().unwrap();
-		let data: *const str = if let Some(str) = set.get(str) {
-			Box::as_ref(str)
+		let mut set = strings.set.write().unwrap();
+		if let Some(str) = set.get(str) {
+			str
 		} else {
-			let str: Box<str> = str.into();
-			let ptr = Box::as_ref(&str) as *const _;
+			let str = self.str(str);
 			set.insert(str);
-			ptr
-		};
-
-		Sym { data, tag }
+			str
+		}
 	}
+
+	pub fn str<T: AsRef<str>>(&self, str: T) -> &str {
+		let str = str.as_ref().as_bytes();
+		let str = self.add_slice(str);
+		unsafe { std::str::from_utf8_unchecked(str) }
+	}
+}
+
+#[derive(Default)]
+pub(crate) struct StringStore<'a> {
+	set: RwLock<HashSet<&'a str>>,
 }
 
 #[cfg(test)]
@@ -142,8 +132,8 @@ mod tests {
 		assert_eq!(b1, b3);
 		assert_eq!(b2, b3);
 
-		assert_eq!(a1, Sym::empty());
-		assert_eq!(a2, Sym::empty());
+		assert_eq!(a1, store.sym(""));
+		assert_eq!(a2, store.sym(""));
 
 		assert!(a1 != b1);
 
