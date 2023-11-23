@@ -24,8 +24,15 @@ impl Store {
 		self.arena.store(value)
 	}
 
-	pub fn add_list<T, I: IntoIterator<Item = T>>(&self, items: I) -> &mut [T] {
-		let slice = self.arena.store_vec(&mut items.into_iter().collect());
+	pub fn add_list<T, I: IntoIterator<Item = T>>(&self, items: I) -> &mut [T]
+	where
+		I::IntoIter: ExactSizeIterator,
+	{
+		self.arena.store_list(items)
+	}
+
+	pub fn add_slice<T: Clone>(&self, items: &[T]) -> &mut [T] {
+		let slice = self.arena.store_list(items.into_iter().cloned());
 		slice
 	}
 }
@@ -56,18 +63,22 @@ impl StoreArena {
 		out
 	}
 
-	pub fn store_vec<'a, T>(&'a self, value: &mut Vec<T>) -> &'a mut [T] {
-		let len = value.len();
+	pub fn store_list<'a, T, I: IntoIterator<Item = T>>(&'a self, items: I) -> &'a mut [T]
+	where
+		I::IntoIter: ExactSizeIterator,
+	{
+		let items = items.into_iter();
+		let len = items.len();
 		if len == 0 {
 			return &mut [];
 		}
 
 		let align = std::mem::align_of::<T>();
-		let size = std::mem::size_of::<T>() * value.len();
+		let size = std::mem::size_of::<T>() * len;
 		let buffer = self.alloc(size, align);
 
 		let mut vec = unsafe { std::mem::ManuallyDrop::new(Vec::from_raw_parts(buffer as *mut T, 0, len)) };
-		vec.extend(value.drain(..));
+		vec.extend(items);
 
 		if std::mem::needs_drop::<T>() {
 			self.on_drop(buffer, len, 0, |ptr, len, _| unsafe {
@@ -292,8 +303,7 @@ mod tests {
 
 		assert_eq!(get_counter(), count);
 
-		let items = arena.store_vec(&mut source_items);
-		assert_eq!(source_items.len(), 0);
+		let items = arena.store_list(source_items);
 		assert_eq!(items.len(), count);
 		assert_eq!(get_counter(), count);
 
