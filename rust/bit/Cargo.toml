@@ -16,3 +16,5 @@ name = "bit"
 path = "bit.rs"
 
 [dependencies]
+
+rand = "0.8.5"
