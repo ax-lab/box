@@ -69,6 +69,7 @@ impl Store {
 		Sym { str }
 	}
 
+	/// Intern the given string data and return the shared string slice.
 	pub fn intern<'a, T: AsRef<str>>(&'a self, str: T) -> &'a str {
 		let str = str.as_ref();
 
@@ -93,9 +94,17 @@ impl Store {
 		}
 	}
 
+	/// Store the given string data and return a new string slice with a
+	/// unique address.
 	pub fn str<T: AsRef<str>>(&self, str: T) -> &str {
-		let str = str.as_ref().as_bytes();
-		let str = self.add_slice(str);
+		let str = str.as_ref();
+		let str = if str.len() == 0 {
+			let str = self.add_slice("\0".as_bytes());
+			&str[..0]
+		} else {
+			let str = str.as_bytes();
+			self.add_slice(str)
+		};
 		unsafe { std::str::from_utf8_unchecked(str) }
 	}
 }
@@ -128,6 +137,7 @@ mod tests {
 
 		// assert equality
 		assert_eq!(a1, a2);
+		assert_eq!(a1.as_ptr(), a2.as_ptr());
 		assert_eq!(b1, b2);
 		assert_eq!(b1, b3);
 		assert_eq!(b2, b3);
@@ -136,6 +146,15 @@ mod tests {
 		assert_eq!(a2, store.sym(""));
 
 		assert!(a1 != b1);
+
+		let s0 = store.sym("");
+		let s1 = store.sym("");
+		let s2 = store.str("");
+		let s3 = store.str("");
+		assert!(s0.as_str().as_ptr() == s1.as_str().as_ptr());
+		assert!(s0.as_str().as_ptr() != s2.as_ptr());
+		assert!(s0.as_str().as_ptr() != s3.as_ptr());
+		assert!(s2.as_ptr() != s3.as_ptr());
 
 		// make sure we are interning the string
 		assert!(b1.as_str() as *const _ == b2.as_str() as *const _);
