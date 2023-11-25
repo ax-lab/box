@@ -29,13 +29,13 @@ impl<'a> Sym<'a> {
 
 impl<'a> Debug for Sym<'a> {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-		write!(f, "`{:?}", self.as_str())
+		write!(f, "{self}")
 	}
 }
 
 impl<'a> Display for Sym<'a> {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-		write!(f, "{}", self.as_str())
+		write!(f, "{}#{:X}", self.as_str(), self.as_ptr() as usize)
 	}
 }
 
@@ -66,6 +66,11 @@ unsafe impl<'a> Sync for Sym<'a> {}
 impl Store {
 	pub fn sym<T: AsRef<str>>(&self, str: T) -> Sym {
 		let str = self.intern(str);
+		Sym { str }
+	}
+
+	pub fn unique<T: AsRef<str>>(&self, str: T) -> Sym {
+		let str = self.str(str);
 		Sym { str }
 	}
 

@@ -12,14 +12,16 @@ pub mod str;
 pub use int::*;
 pub use str::*;
 
-pub trait IsType<'a>: Sized {
+pub trait IsType<'a>: Sized + 'a {
+	type Data: Copy + Default;
+
+	fn name() -> &'static str;
+
 	fn get(store: &'a Store) -> Type<'a> {
 		store.get_type::<Self>()
 	}
 
-	fn name() -> &'static str;
-
-	fn init(data: &mut TypeData<'a>) {
+	fn init_type(data: &mut TypeData<'a>) {
 		let _ = data;
 	}
 }
@@ -30,13 +32,18 @@ pub struct Type<'a> {
 }
 
 pub struct TypeData<'a> {
+	id: TypeId,
 	store: &'a Store,
-	name: String,
+	name: Sym<'a>,
 }
 
 impl<'a> Type<'a> {
-	pub fn name(&self) -> &'a str {
-		&self.data.name
+	pub fn id(&self) -> TypeId {
+		self.data.id
+	}
+
+	pub fn name(&self) -> Sym<'a> {
+		self.data.name
 	}
 
 	pub fn store(&self) -> &'a Store {
@@ -45,8 +52,8 @@ impl<'a> Type<'a> {
 }
 
 impl<'a> TypeData<'a> {
-	pub fn set_name<T: Into<String>>(&mut self, name: T) {
-		self.name = name.into();
+	pub fn set_name<T: AsRef<str>>(&mut self, name: T) {
+		self.name = self.store.unique(name)
 	}
 }
 
@@ -82,10 +89,11 @@ impl Store {
 		let mut map = types.map.write().unwrap();
 		let entry = map.entry(id).or_insert_with(|| {
 			let data = self.add(TypeData {
+				id,
 				store: self,
-				name: T::name().into(),
+				name: self.unique(T::name()),
 			});
-			T::init(data);
+			T::init_type(data);
 			Type { data }
 		});
 		*entry
@@ -124,7 +132,9 @@ mod tests {
 		let ta = TestType::get(&store);
 		let tb = TestType::get(&store);
 
-		assert_eq!(ta.name(), "TestType");
+		assert_eq!(ta.name().as_str(), "TestType");
+		assert_eq!(ta.name(), tb.name());
+		assert!(ta.name() != store.sym("TestType")); // name should be unique
 		assert_eq!(ta, tb);
 	}
 
@@ -141,6 +151,8 @@ mod tests {
 	struct TestType;
 
 	impl<'a> IsType<'a> for TestType {
+		type Data = ();
+
 		fn name() -> &'static str {
 			"TestType"
 		}
