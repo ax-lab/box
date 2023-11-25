@@ -1,3 +1,4 @@
+pub mod c;
 pub mod cmd;
 pub mod code;
 pub mod int;
@@ -22,3 +23,7 @@ pub use sources::*;
 pub use span::*;
 pub use store::*;
 pub use strings::*;
+
+pub fn error<T: std::fmt::Display>(msg: T) {
+	let _ = term::error(std::io::stderr(), msg);
+}

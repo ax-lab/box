@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::{fmt::Display, io::Write};
 
 /*
 	Escape sequences
@@ -83,6 +83,19 @@ use std::io::Write;
 */
 
 use super::*;
+
+pub fn error<T: Write, U: Display>(out: T, msg: U) -> Result<()> {
+	output(out, RED, msg)
+}
+
+pub fn output<T: Write, U: Display>(mut out: T, color: Color, msg: U) -> Result<()> {
+	reset(&mut out)?;
+	color.fg(&mut out)?;
+	write!(&mut out, "{msg}")?;
+	reset(&mut out)?;
+	out.flush()?;
+	Ok(())
+}
 
 pub const ESC: char = '\x1B';
 

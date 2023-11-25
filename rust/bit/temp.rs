@@ -1,21 +1,21 @@
 use std::{
 	ffi::OsStr,
 	fmt::{Display, Formatter},
-	fs::{File, OpenOptions},
+	fs::OpenOptions,
 	io::{ErrorKind, Write},
 	path::{Path, PathBuf},
 };
 
 use super::*;
 
-pub fn dir() -> Result<TempDir> {
+pub fn dir() -> Result<Dir> {
 	let temp = std::env::temp_dir().canonicalize()?;
 	for _ in 0..100 {
 		let uniq = rand::random::<u32>();
 		let name = format!("bit_{uniq}.tmp");
 		let path = temp.join(name);
 		match std::fs::create_dir(&path) {
-			Ok(_) => return Ok(TempDir { path }),
+			Ok(_) => return Ok(Dir { path }),
 			Err(err) => {
 				if err.kind() != ErrorKind::AlreadyExists {
 					Err(err)?
@@ -26,16 +26,16 @@ pub fn dir() -> Result<TempDir> {
 	Err("could not generate a unique directory")?
 }
 
-pub struct TempDir {
+pub struct Dir {
 	path: PathBuf,
 }
 
-impl TempDir {
+impl Dir {
 	pub fn path(&self) -> &Path {
 		&self.path
 	}
 
-	pub fn file<T: AsRef<Path>>(&self, name: T) -> Result<TempFile> {
+	pub fn file<T: AsRef<Path>>(&self, name: T) -> Result<File> {
 		let name = name.as_ref();
 		assert!(!name.is_absolute());
 
@@ -60,17 +60,17 @@ impl TempDir {
 		let file = OpenOptions::new().write(true).create_new(true).open(&path)?;
 		let path = path.canonicalize()?;
 		assert!(path.starts_with(&self.path));
-		Ok(TempFile { file, path })
+		Ok(File { file, path })
 	}
 }
 
-impl Display for TempDir {
+impl Display for Dir {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
 		write!(f, "{}", self.path.to_string_lossy())
 	}
 }
 
-impl Drop for TempDir {
+impl Drop for Dir {
 	fn drop(&mut self) {
 		if let Err(err) = std::fs::remove_dir_all(&self.path) {
 			eprintln!("could not delete temp dir: {err} -- {:?}", self.path);
@@ -78,12 +78,12 @@ impl Drop for TempDir {
 	}
 }
 
-pub struct TempFile {
+pub struct File {
 	path: PathBuf,
-	file: File,
+	file: std::fs::File,
 }
 
-impl TempFile {
+impl File {
 	pub fn path(&self) -> &Path {
 		&self.path
 	}
@@ -104,15 +104,19 @@ impl TempFile {
 		std::fs::remove_file(path)?;
 		Ok(())
 	}
+
+	pub fn into_path(self) -> PathBuf {
+		self.path
+	}
 }
 
-impl Display for TempFile {
+impl Display for File {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
 		write!(f, "{}", self.path().to_string_lossy())
 	}
 }
 
-impl std::io::Write for TempFile {
+impl std::io::Write for File {
 	fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
 		self.file.write(buf)
 	}
@@ -122,7 +126,7 @@ impl std::io::Write for TempFile {
 	}
 }
 
-impl std::fmt::Write for TempFile {
+impl std::fmt::Write for File {
 	fn write_str(&mut self, s: &str) -> std::fmt::Result {
 		match self.file.write_all(s.as_bytes()) {
 			Ok(_) => Ok(()),
