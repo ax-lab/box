@@ -1,3 +1,4 @@
+pub mod cmd;
 pub mod code;
 pub mod int;
 pub mod lexer;
@@ -9,6 +10,8 @@ pub mod span;
 pub mod store;
 pub mod strings;
 pub mod temp;
+pub mod term;
+pub mod unicode;
 
 pub use code::*;
 pub use lexer::*;

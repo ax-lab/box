@@ -1,6 +1,8 @@
 use std::{
 	fmt::{Debug, Display, Formatter},
-	sync::Arc,
+	str::Utf8Error,
+	string::FromUtf8Error,
+	sync::{mpsc::SendError, Arc},
 };
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -11,7 +13,7 @@ pub struct Error {
 }
 
 impl Error {
-	pub fn from<T: std::error::Error + 'static>(error: T) -> Self {
+	pub fn from<T: std::error::Error + Send + Sync + 'static>(error: T) -> Self {
 		Self {
 			info: ErrorInfo::Custom(Arc::new(error)),
 		}
@@ -34,7 +36,7 @@ impl Error {
 enum ErrorInfo {
 	String(String),
 	Static(&'static str),
-	Custom(Arc<dyn std::error::Error>),
+	Custom(Arc<dyn std::error::Error + Send + Sync>),
 }
 
 impl Display for Error {
@@ -73,6 +75,24 @@ impl From<std::io::Error> for Error {
 
 impl From<std::fmt::Error> for Error {
 	fn from(value: std::fmt::Error) -> Self {
+		Error::from(value)
+	}
+}
+
+impl From<Utf8Error> for Error {
+	fn from(value: Utf8Error) -> Self {
+		Error::from(value)
+	}
+}
+
+impl From<FromUtf8Error> for Error {
+	fn from(value: FromUtf8Error) -> Self {
+		Error::from(value)
+	}
+}
+
+impl<T: 'static + Send + Sync> From<SendError<T>> for Error {
+	fn from(value: SendError<T>) -> Self {
 		Error::from(value)
 	}
 }
