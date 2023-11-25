@@ -12,6 +12,7 @@ use super::*;
 pub struct Store {
 	pub(crate) strings: StringStore<'static>,
 	pub(crate) sources: SourceStore,
+	pub(crate) types: TypeStore<'static>,
 	arena: StoreArena,
 }
 

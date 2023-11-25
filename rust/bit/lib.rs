@@ -12,6 +12,7 @@ pub mod store;
 pub mod strings;
 pub mod temp;
 pub mod term;
+pub mod types;
 pub mod unicode;
 
 pub use code::*;
@@ -23,6 +24,7 @@ pub use sources::*;
 pub use span::*;
 pub use store::*;
 pub use strings::*;
+pub use types::*;
 
 pub fn error<T: std::fmt::Display>(msg: T) {
 	let _ = term::error(std::io::stderr(), msg);
