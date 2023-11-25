@@ -40,12 +40,16 @@ pub fn indent<T: AsRef<str>>(text: T) -> String {
 pub fn indent_with<T: AsRef<str>, U: AsRef<str>>(text: T, indent: U) -> String {
 	let indent = indent.as_ref();
 	let mut output = String::new();
-	for line in text.as_ref().lines() {
+	let text = text.as_ref();
+	for line in text.lines() {
 		if output.len() > 0 {
 			output.push('\n');
 			output.push_str(indent);
 		}
 		output.push_str(line);
+	}
+	if text.ends_with("\n") || text.ends_with("\r\n") || text.ends_with("\r") {
+		output.push('\n');
 	}
 	output
 }
