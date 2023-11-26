@@ -172,6 +172,8 @@ mod tests {
 		assert!(i32::type_id() != i64::type_id());
 		assert!(str::type_id() == str::type_id());
 		assert!(str::type_id() != String::type_id());
+		assert!(Marker::<i32>::type_id() != Marker::<i64>::type_id());
+		assert!(Marker::<&dyn A>::type_id() != Marker::<&dyn B>::type_id());
 		assert!(TestType::type_id() == TestType::type_id());
 	}
 
@@ -184,4 +186,11 @@ mod tests {
 	}
 
 	impl HasTraits for TestType {}
+
+	struct Marker<T> {
+		tag: PhantomData<T>,
+	}
+
+	trait A {}
+	trait B {}
 }
