@@ -9,13 +9,21 @@ use super::*;
 
 pub mod int;
 pub mod str;
-pub mod traits;
 
 pub use int::*;
 pub use str::*;
-pub use traits::*;
 
-pub trait IsType<'a>: Sized + 'a {
+pub trait HasTraits {
+	fn as_debug(&self) -> Option<&dyn Debug> {
+		None
+	}
+
+	fn as_display(&self) -> Option<&dyn Display> {
+		None
+	}
+}
+
+pub trait IsType<'a>: HasTraits + Sized + 'a {
 	fn name() -> &'static str;
 
 	fn get(store: &'a Store) -> Type<'a> {
@@ -41,7 +49,7 @@ struct TypeData<'a> {
 	id: TypeId,
 	store: &'a Store,
 	symbol: Sym<'a>,
-	traits: Traits,
+	as_traits: fn(*const ()) -> &'a dyn HasTraits,
 }
 
 impl<'a> Type<'a> {
@@ -59,6 +67,10 @@ impl<'a> Type<'a> {
 
 	pub fn store(&self) -> &'a Store {
 		self.data.store
+	}
+
+	pub fn get_traits(&self, ptr: *const ()) -> &'a dyn HasTraits {
+		(self.data.as_traits)(ptr)
 	}
 }
 
@@ -103,7 +115,7 @@ impl Store {
 				id,
 				store: self,
 				symbol: self.unique(T::name()),
-				traits: Default::default(),
+				as_traits: |ptr| unsafe { &*(ptr as *const T) },
 			};
 			let mut builder = TypeBuilder { data, tag: PhantomData };
 			T::init_type(&mut builder);
@@ -170,4 +182,6 @@ mod tests {
 			"TestType"
 		}
 	}
+
+	impl HasTraits for TestType {}
 }

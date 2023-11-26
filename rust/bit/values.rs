@@ -20,6 +20,10 @@ impl<'a> Value<'a> {
 		self.typ
 	}
 
+	pub fn traits(&self) -> &'a dyn HasTraits {
+		self.typ.get_traits(self.ptr)
+	}
+
 	pub fn cast<T: IsType<'a>>(&self) -> Option<&'a T> {
 		if self.typ.id() == T::type_id() {
 			let data = unsafe { &*(self.ptr as *const T) };
@@ -32,8 +36,8 @@ impl<'a> Value<'a> {
 
 impl<'a> Display for Value<'a> {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-		if let Some(format) = self.typ.as_format() {
-			format.display(self.ptr, f)
+		if let Some(value) = self.traits().as_display() {
+			value.fmt(f)
 		} else {
 			write!(f, "{}({:?})", self.typ.name(), self.ptr)
 		}
@@ -42,8 +46,8 @@ impl<'a> Display for Value<'a> {
 
 impl<'a> Debug for Value<'a> {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-		if let Some(format) = self.typ.as_format() {
-			format.debug(self.ptr, f)
+		if let Some(value) = self.traits().as_debug() {
+			value.fmt(f)
 		} else {
 			write!(f, "{}({:?})", self.typ.name(), self.ptr)
 		}

@@ -38,8 +38,14 @@ impl<'a> IsType<'a> for Str<'a> {
 	fn name() -> &'static str {
 		"Str"
 	}
+}
 
-	fn init_type(data: &mut TypeBuilder<'a, Self>) {
-		data.with_format()
+impl<'a> HasTraits for Str<'a> {
+	fn as_debug(&self) -> Option<&dyn Debug> {
+		Some(self)
+	}
+
+	fn as_display(&self) -> Option<&dyn Display> {
+		Some(self)
 	}
 }
