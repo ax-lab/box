@@ -1,6 +1,7 @@
 use std::{
 	collections::HashMap,
-	fmt::{Debug, Formatter},
+	fmt::{Debug, Display, Formatter},
+	marker::PhantomData,
 	sync::RwLock,
 };
 
@@ -8,20 +9,20 @@ use super::*;
 
 pub mod int;
 pub mod str;
+pub mod traits;
 
 pub use int::*;
 pub use str::*;
+pub use traits::*;
 
 pub trait IsType<'a>: Sized + 'a {
-	type Data: Copy + Default;
-
 	fn name() -> &'static str;
 
 	fn get(store: &'a Store) -> Type<'a> {
 		store.get_type::<Self>()
 	}
 
-	fn init_type(data: &mut TypeData<'a>) {
+	fn init_type(data: &mut TypeBuilder<'a, Self>) {
 		let _ = data;
 	}
 }
@@ -31,10 +32,16 @@ pub struct Type<'a> {
 	data: &'a TypeData<'a>,
 }
 
-pub struct TypeData<'a> {
+pub struct TypeBuilder<'a, T: IsType<'a>> {
+	data: TypeData<'a>,
+	tag: PhantomData<T>,
+}
+
+struct TypeData<'a> {
 	id: TypeId,
 	store: &'a Store,
-	name: Sym<'a>,
+	symbol: Sym<'a>,
+	traits: Traits,
 }
 
 impl<'a> Type<'a> {
@@ -42,8 +49,12 @@ impl<'a> Type<'a> {
 		self.data.id
 	}
 
-	pub fn name(&self) -> Sym<'a> {
-		self.data.name
+	pub fn name(&self) -> &'a str {
+		self.data.symbol.as_str()
+	}
+
+	pub fn symbol(&self) -> Sym<'a> {
+		self.data.symbol
 	}
 
 	pub fn store(&self) -> &'a Store {
@@ -51,9 +62,9 @@ impl<'a> Type<'a> {
 	}
 }
 
-impl<'a> TypeData<'a> {
-	pub fn set_name<T: AsRef<str>>(&mut self, name: T) {
-		self.name = self.store.unique(name)
+impl<'a, T: IsType<'a>> TypeBuilder<'a, T> {
+	pub fn set_name<U: AsRef<str>>(&mut self, name: U) {
+		self.data.symbol = self.data.store.unique(name)
 	}
 }
 
@@ -67,7 +78,7 @@ impl<'a> PartialEq for Type<'a> {
 
 impl<'a> Debug for Type<'a> {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-		write!(f, "Type({})", self.name())
+		write!(f, "Type({})", self.symbol())
 	}
 }
 
@@ -88,12 +99,16 @@ impl Store {
 
 		let mut map = types.map.write().unwrap();
 		let entry = map.entry(id).or_insert_with(|| {
-			let data = self.add(TypeData {
+			let data = TypeData {
 				id,
 				store: self,
-				name: self.unique(T::name()),
-			});
-			T::init_type(data);
+				symbol: self.unique(T::name()),
+				traits: Default::default(),
+			};
+			let mut builder = TypeBuilder { data, tag: PhantomData };
+			T::init_type(&mut builder);
+
+			let data = self.add(builder.data);
 			Type { data }
 		});
 		*entry
@@ -132,9 +147,9 @@ mod tests {
 		let ta = TestType::get(&store);
 		let tb = TestType::get(&store);
 
-		assert_eq!(ta.name().as_str(), "TestType");
-		assert_eq!(ta.name(), tb.name());
-		assert!(ta.name() != store.sym("TestType")); // name should be unique
+		assert_eq!(ta.symbol().as_str(), "TestType");
+		assert_eq!(ta.symbol(), tb.symbol());
+		assert!(ta.symbol() != store.sym("TestType")); // name should be unique
 		assert_eq!(ta, tb);
 	}
 
@@ -151,8 +166,6 @@ mod tests {
 	struct TestType;
 
 	impl<'a> IsType<'a> for TestType {
-		type Data = ();
-
 		fn name() -> &'static str {
 			"TestType"
 		}

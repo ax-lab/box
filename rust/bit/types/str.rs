@@ -35,9 +35,11 @@ impl<'a> Debug for Str<'a> {
 }
 
 impl<'a> IsType<'a> for Str<'a> {
-	type Data = Self;
-
 	fn name() -> &'static str {
 		"Str"
+	}
+
+	fn init_type(data: &mut TypeBuilder<'a, Self>) {
+		data.with_format()
 	}
 }

@@ -9,10 +9,24 @@ impl Int {
 	}
 }
 
-impl<'a> IsType<'a> for Int {
-	type Data = Self;
+impl Display for Int {
+	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+		write!(f, "{}", self.0)
+	}
+}
 
+impl Debug for Int {
+	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+		write!(f, "{}", self.0)
+	}
+}
+
+impl<'a> IsType<'a> for Int {
 	fn name() -> &'static str {
 		"Int"
+	}
+
+	fn init_type(data: &mut TypeBuilder<'a, Self>) {
+		data.with_format();
 	}
 }
