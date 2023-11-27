@@ -9,19 +9,11 @@ use super::*;
 
 pub mod int;
 pub mod str;
+pub mod traits;
 
 pub use int::*;
 pub use str::*;
-
-pub trait HasTraits {
-	fn as_debug(&self) -> Option<&dyn Debug> {
-		None
-	}
-
-	fn as_display(&self) -> Option<&dyn Display> {
-		None
-	}
-}
+pub use traits::*;
 
 pub trait IsType<'a>: HasTraits + Sized + 'a {
 	fn name() -> &'static str;

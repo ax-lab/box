@@ -1,4 +1,7 @@
-use std::fmt::{Debug, Display, Formatter};
+use std::{
+	cell::Cell,
+	fmt::{Debug, Display, Formatter},
+};
 
 use super::*;
 
@@ -6,14 +9,26 @@ use super::*;
 pub struct Value<'a> {
 	ptr: *const (),
 	typ: Type<'a>,
+	data: &'a ValueData<'a>,
+}
+
+#[derive(Default)]
+struct ValueData<'a> {
+	span: Cell<Span<'a>>,
 }
 
 impl<'a> Value<'a> {
 	pub fn new<T: IsType<'a>>(store: &'a Store, data: T) -> Self {
 		let typ = store.get_type::<T>();
-		let data = store.add(data);
-		let data = data as *const T as *const ();
-		Value { ptr: data, typ }
+		let ptr = store.add(data);
+		let ptr = ptr as *const T as *const ();
+		let data = store.add(ValueData::default());
+		Value { ptr, typ, data }
+	}
+
+	pub fn with_span(self, span: Span<'a>) -> Self {
+		self.set_span(span);
+		self
 	}
 
 	pub fn get_type(&self) -> Type<'a> {
@@ -32,11 +47,19 @@ impl<'a> Value<'a> {
 			None
 		}
 	}
+
+	pub fn span(&self) -> Span<'a> {
+		self.data.span.get()
+	}
+
+	pub fn set_span(&self, span: Span<'a>) {
+		self.data.span.set(span)
+	}
 }
 
 impl<'a> Display for Value<'a> {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-		if let Some(value) = self.traits().as_display() {
+		if let Some(value) = self.as_display() {
 			value.fmt(f)
 		} else {
 			write!(f, "{}({:?})", self.typ.name(), self.ptr)
@@ -46,7 +69,7 @@ impl<'a> Display for Value<'a> {
 
 impl<'a> Debug for Value<'a> {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-		if let Some(value) = self.traits().as_debug() {
+		if let Some(value) = self.as_debug() {
 			value.fmt(f)
 		} else {
 			write!(f, "{}({:?})", self.typ.name(), self.ptr)
