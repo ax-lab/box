@@ -40,12 +40,8 @@ impl<'a> IsType<'a> for Str<'a> {
 	}
 }
 
-impl<'a> HasTraits for Str<'a> {
-	fn as_debug(&self) -> Option<&dyn Debug> {
-		Some(self)
-	}
-
-	fn as_display(&self) -> Option<&dyn Display> {
-		Some(self)
+impl<'a> HasTraits<'a> for Str<'a> {
+	fn cast_dyn(&'a self, cast: CastDyn<'a>) -> CastDyn<'a> {
+		cast.as_trait(|| self as &dyn Debug).as_trait(|| self as &dyn Display)
 	}
 }

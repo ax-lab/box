@@ -15,7 +15,7 @@ pub use int::*;
 pub use str::*;
 pub use traits::*;
 
-pub trait IsType<'a>: HasTraits + Sized + 'a {
+pub trait IsType<'a>: HasTraits<'a> + Sized + 'a {
 	fn name() -> &'static str;
 
 	fn get(store: &'a Store) -> Type<'a> {
@@ -41,7 +41,7 @@ struct TypeData<'a> {
 	id: TypeId,
 	store: &'a Store,
 	symbol: Sym<'a>,
-	as_traits: fn(*const ()) -> &'a dyn HasTraits,
+	as_traits: fn(*const ()) -> &'a dyn HasTraits<'a>,
 }
 
 impl<'a> Type<'a> {
@@ -61,8 +61,12 @@ impl<'a> Type<'a> {
 		self.data.store
 	}
 
-	pub fn get_traits(&self, ptr: *const ()) -> &'a dyn HasTraits {
+	pub fn get_traits(&self, ptr: *const ()) -> &'a dyn HasTraits<'a> {
 		(self.data.as_traits)(ptr)
+	}
+
+	pub fn type_id(&self) -> TypeId {
+		self.data.id
 	}
 }
 
@@ -119,7 +123,7 @@ impl Store {
 	}
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct TypeId(usize);
 
 pub trait TypeInfo {
@@ -177,7 +181,7 @@ mod tests {
 		}
 	}
 
-	impl HasTraits for TestType {}
+	impl<'a> HasTraits<'a> for TestType {}
 
 	struct Marker<T> {
 		tag: PhantomData<T>,

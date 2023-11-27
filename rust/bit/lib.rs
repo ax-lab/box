@@ -1,4 +1,4 @@
-pub mod c;
+pub mod clang;
 pub mod cmd;
 pub mod code;
 pub mod int;

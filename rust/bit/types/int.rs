@@ -27,12 +27,21 @@ impl<'a> IsType<'a> for Int {
 	}
 }
 
-impl HasTraits for Int {
-	fn as_debug(&self) -> Option<&dyn Debug> {
-		Some(self)
+impl<'a> HasTraits<'a> for Int {
+	fn cast(&'a self, cast: Cast<'a>) -> Cast<'a> {
+		cast.to(|store| store.add(self.0 as i8))
+			.to(|store| store.add(self.0 as i16))
+			.to(|store| store.add(self.0 as i32))
+			.to(|store| store.add(self.0 as i64))
+			.to(|store| store.add(self.0 as i128))
+			.to(|store| store.add(self.0 as u8))
+			.to(|store| store.add(self.0 as u16))
+			.to(|store| store.add(self.0 as u32))
+			.to(|store| store.add(self.0 as u64))
+			.to(|store| store.add(self.0 as u128))
 	}
 
-	fn as_display(&self) -> Option<&dyn Display> {
-		Some(self)
+	fn cast_dyn(&'a self, cast: CastDyn<'a>) -> CastDyn<'a> {
+		cast.as_trait(|| self as &dyn Display).as_trait(|| self as &dyn Debug)
 	}
 }
