@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use super::*;
 
 pub fn digit(chr: char, base: u8) -> Result<u8> {
@@ -54,14 +56,14 @@ pub fn is_zero(num: &mut Vec<u32>) -> bool {
 	num[0] == 0 && num.len() == 1
 }
 
-pub fn int_to_dec(num: &Vec<u32>) -> String {
+pub fn int_to_dec(num: &[u32]) -> String {
 	match num.len() {
 		0 => return format!("0"),
 		1 => return format!("{}", num[0]),
 		_ => {}
 	}
 
-	let mut num = num.clone();
+	let mut num = Vec::from(num);
 	let mut output = String::new();
 	while !is_zero(&mut num) {
 		let digit = div_mod(&mut num, 10);
@@ -78,6 +80,18 @@ pub fn int_to_dec(num: &Vec<u32>) -> String {
 		bytes.swap(s, e);
 	}
 
+	output
+}
+
+pub fn int_to_hex(num: &[u32]) -> String {
+	let mut output = String::new();
+	for (i, n) in num.iter().rev().enumerate() {
+		if i == 0 {
+			let _ = write!(&mut output, "{n:X}");
+		} else {
+			let _ = write!(&mut output, "{n:08X}");
+		}
+	}
 	output
 }
 
@@ -100,11 +114,23 @@ mod tests {
 		Ok(())
 	}
 
+	#[test]
+	fn number_hex() -> Result<()> {
+		let num = parse_int("2882343476", 10)?;
+		let hex = int_to_hex(&num);
+		assert_eq!(hex, "ABCD1234");
+		Ok(())
+	}
+
 	fn test_num(input: &str, words: usize) -> Result<()> {
 		let num = parse_int(input, 10)?;
 		let str = int_to_dec(&num);
 		assert_eq!(num.len(), words);
 		assert_eq!(input, str);
+
+		let hex = int_to_hex(&num);
+		let hex = parse_int(&hex, 16)?;
+		assert_eq!(num, hex);
 		Ok(())
 	}
 }
