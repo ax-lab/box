@@ -2,6 +2,8 @@ use std::fmt::{Debug, Display, Formatter};
 
 use super::*;
 
+const DEFAULT_TAB_WIDTH: usize = 4;
+
 pub trait Tokenizer: Clone + Default {
 	fn tokenize<'a>(&mut self, span: &mut Span<'a>, pos: &mut Pos) -> Vec<Token<'a>>;
 }
@@ -50,7 +52,7 @@ impl Pos {
 		Self::default()
 	}
 
-	pub fn advance<T: Grammar>(&mut self, text: &str) {
+	pub fn advance<T: Grammar>(&mut self, text: &str, tab_width: usize) {
 		let mut was_cr = false;
 		for char in text.chars() {
 			if char == '\r' || char == '\n' {
@@ -64,7 +66,11 @@ impl Pos {
 				was_cr = false;
 
 				let indent = self.indent == self.column && T::is_space(char);
-				self.column += 1;
+				if char == '\t' {
+					self.column += tab_width - self.column % tab_width;
+				} else {
+					self.column += 1;
+				}
 				if indent {
 					self.indent = self.column;
 				}
@@ -210,6 +216,7 @@ impl Grammar for BasicGrammar {
 pub struct Lexer<T: Grammar> {
 	symbols: SymbolTable,
 	grammar: T,
+	tab_width: usize,
 }
 
 impl<T: Grammar> Lexer<T> {
@@ -217,6 +224,15 @@ impl<T: Grammar> Lexer<T> {
 		Self {
 			symbols: Default::default(),
 			grammar,
+			tab_width: 0,
+		}
+	}
+
+	pub fn tab_width(&self) -> usize {
+		if self.tab_width == 0 {
+			DEFAULT_TAB_WIDTH
+		} else {
+			self.tab_width
 		}
 	}
 
@@ -271,7 +287,7 @@ impl<T: Grammar> Lexer<T> {
 	}
 
 	fn advance(&self, span: &mut Span, pos: &mut Pos, len: usize) {
-		pos.advance::<T>(span.range(..len));
+		pos.advance::<T>(span.range(..len), self.tab_width());
 		*span = span.slice(len..);
 	}
 }
