@@ -287,7 +287,7 @@ impl<T: Grammar> Lexer<T> {
 	}
 
 	fn advance(&self, span: &mut Span, pos: &mut Pos, len: usize) {
-		pos.advance::<T>(span.range(..len), self.tab_width());
+		pos.advance::<T>(span.text_at(..len), self.tab_width());
 		*span = span.slice(len..);
 	}
 }

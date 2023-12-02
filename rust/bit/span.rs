@@ -7,9 +7,9 @@ use super::*;
 
 #[derive(Copy, Clone, Default, Eq, PartialEq, Hash)]
 pub struct Span<'a> {
-	src: Source<'a>,
-	sta: usize,
-	end: usize,
+	pub src: Source<'a>,
+	pub sta: usize,
+	pub end: usize,
 }
 
 impl<'a> Span<'a> {
@@ -21,18 +21,6 @@ impl<'a> Span<'a> {
 		}
 	}
 
-	pub fn src(&self) -> Source<'a> {
-		self.src
-	}
-
-	pub fn sta(&self) -> usize {
-		self.sta
-	}
-
-	pub fn end(&self) -> usize {
-		self.end
-	}
-
 	pub fn len(&self) -> usize {
 		self.end - self.sta
 	}
@@ -42,7 +30,7 @@ impl<'a> Span<'a> {
 		&text[self.sta..self.end]
 	}
 
-	pub fn range<T: RangeBounds<usize>>(&self, range: T) -> &'a str {
+	pub fn text_at<T: RangeBounds<usize>>(&self, range: T) -> &'a str {
 		self.slice(range).text()
 	}
 
@@ -96,8 +84,8 @@ impl<'a> Span<'a> {
 
 impl<'a> Display for Span<'a> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		let src = self.src().name();
-		let pos = self.sta();
+		let src = self.src.name();
+		let pos = self.sta;
 		let len = self.len();
 		write!(f, "{src}:{pos}+{len}")
 	}
