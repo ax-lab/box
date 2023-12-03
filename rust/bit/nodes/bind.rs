@@ -651,7 +651,7 @@ mod tests {
 		assert!(output.len() > 0)
 	}
 
-	#[derive(Copy, Clone, Debug)]
+	#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 	enum TextNode {
 		Input(&'static str),
 		Char(char),
@@ -669,13 +669,14 @@ mod tests {
 		}
 	}
 
-	impl<'a> IsType<'a> for TextNode {
-		fn name() -> &'static str {
-			"TextNode"
+	impl IsAny for TextNode {}
+	impl HasTraits for TextNode {}
+
+	impl<'a> IsValue<'a> for TextNode {
+		fn set_value(self, store: &'a Store, value: &mut Value<'a>) {
+			*value = Value::Any(store.any(self))
 		}
 	}
-
-	impl<'a> HasTraits<'a> for TextNode {}
 
 	fn process<'a>(mut table: Table<'a, ()>) -> Vec<(char, usize, Span<'a>)> {
 		let store = table.store;
@@ -741,38 +742,6 @@ mod tests {
 		sta: 0,
 		end: usize::MAX,
 	};
-
-	impl<'a> IsType<'a> for i32 {
-		fn name() -> &'static str {
-			"i32"
-		}
-	}
-
-	impl<'a> HasTraits<'a> for i32 {
-		fn cast(&'a self, cast: Cast<'a>) -> Cast<'a> {
-			cast
-		}
-
-		fn cast_dyn(&'a self, cast: CastDyn<'a>) -> CastDyn<'a> {
-			cast.as_trait(|| self as &dyn std::fmt::Debug)
-		}
-	}
-
-	impl<'a> IsType<'a> for &'a str {
-		fn name() -> &'static str {
-			"i32"
-		}
-	}
-
-	impl<'a> HasTraits<'a> for &'a str {
-		fn cast(&'a self, cast: Cast<'a>) -> Cast<'a> {
-			cast
-		}
-
-		fn cast_dyn(&'a self, cast: CastDyn<'a>) -> CastDyn<'a> {
-			cast.as_trait(|| self as &dyn std::fmt::Debug)
-		}
-	}
 
 	fn pos<'a>(store: &'a Store, pos: usize) -> Span<'a> {
 		let txt = " ".repeat(pos + 1);

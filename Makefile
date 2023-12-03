@@ -5,3 +5,6 @@ run:
 
 test:
 	@ ./cargo-test
+
+test-release:
+	@ ./cargo-test --release

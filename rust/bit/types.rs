@@ -1,8 +1,7 @@
 use std::{
-	collections::HashMap,
+	cmp::Ordering as Cmp,
 	fmt::{Debug, Display, Formatter},
-	marker::PhantomData,
-	sync::RwLock,
+	hash::{Hash, Hasher},
 };
 
 use super::*;
@@ -15,131 +14,127 @@ pub use int::*;
 pub use str::*;
 pub use traits::*;
 
-pub trait IsType<'a>: HasTraits<'a> + Sized + 'a {
-	fn name() -> &'static str;
-
-	fn get(store: &'a Store) -> Type<'a> {
-		store.get_type::<Self>()
+pub trait IsAny: HasTraits + Debug + Eq + PartialEq + Ord + PartialOrd + Hash + Sized {
+	fn get_type() -> Type {
+		let data = TypeInfo::get::<Self>();
+		Type { data }
 	}
 
-	fn init_type(data: &mut TypeBuilder<'a, Self>) {
-		let _ = data;
+	fn get_traits(&self) -> &dyn HasTraits {
+		self
+	}
+}
+
+#[repr(C)]
+pub struct Any(Type);
+
+impl Store {
+	pub fn any<'a, T: IsAny + 'a>(&'a self, data: T) -> &'a Any {
+		let data = self.add(AnyCell(T::get_type(), data));
+		data.as_any()
+	}
+}
+
+impl Any {
+	pub fn get_type(&self) -> Type {
+		self.0
+	}
+
+	pub fn cast<T>(&self) -> Option<&T> {
+		if self.get_type().is::<T>() {
+			let value: &AnyCell<T> = unsafe { std::mem::transmute(self) };
+			Some(&value.1)
+		} else {
+			None
+		}
+	}
+
+	pub fn traits(&self) -> &dyn HasTraits {
+		let traits = self.get_type().data.trait_fn();
+		traits(self)
+	}
+
+	pub fn as_ptr(&self) -> *const () {
+		self as *const _ as *const _
+	}
+}
+
+#[repr(C)]
+struct AnyCell<T>(Type, T);
+
+impl<T> AnyCell<T> {
+	pub fn as_any(&self) -> &Any {
+		unsafe { std::mem::transmute(self) }
 	}
 }
 
 #[derive(Copy, Clone)]
-pub struct Type<'a> {
-	data: &'a TypeData<'a>,
+pub struct Type {
+	data: &'static TypeInfo,
 }
 
-pub struct TypeBuilder<'a, T: IsType<'a>> {
-	data: TypeData<'a>,
-	tag: PhantomData<T>,
-}
+impl Type {
+	pub fn name(&self) -> &'static str {
+		self.data.name()
+	}
 
-struct TypeData<'a> {
-	id: TypeId,
-	store: &'a Store,
-	symbol: Sym<'a>,
-	as_traits: fn(*const ()) -> &'a dyn HasTraits<'a>,
-}
-
-impl<'a> Type<'a> {
 	pub fn id(&self) -> TypeId {
-		self.data.id
+		self.data.id()
 	}
 
-	pub fn name(&self) -> &'a str {
-		self.data.symbol.as_str()
-	}
-
-	pub fn symbol(&self) -> Sym<'a> {
-		self.data.symbol
-	}
-
-	pub fn store(&self) -> &'a Store {
-		self.data.store
-	}
-
-	pub fn get_traits(&self, ptr: *const ()) -> &'a dyn HasTraits<'a> {
-		(self.data.as_traits)(ptr)
-	}
-
-	pub fn type_id(&self) -> TypeId {
-		self.data.id
+	pub fn is<T>(&self) -> bool {
+		T::type_id() == self.id()
 	}
 }
 
-impl<'a, T: IsType<'a>> TypeBuilder<'a, T> {
-	pub fn set_name<U: AsRef<str>>(&mut self, name: U) {
-		self.data.symbol = self.data.store.unique(name)
-	}
-}
+impl Eq for Type {}
 
-impl<'a> Eq for Type<'a> {}
-
-impl<'a> PartialEq for Type<'a> {
+impl PartialEq for Type {
 	fn eq(&self, other: &Self) -> bool {
-		self.data as *const _ == other.data as *const _
+		self.id() == other.id()
 	}
 }
 
-impl<'a> Debug for Type<'a> {
+impl Ord for Type {
+	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+		self.name().cmp(other.name()).then_with(|| self.id().cmp(&other.id()))
+	}
+}
+
+impl PartialOrd for Type {
+	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Hash for Type {
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+		self.id().hash(state);
+	}
+}
+
+impl Debug for Type {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-		write!(f, "Type({})", self.symbol())
+		write!(f, "<{}>", self.name())
 	}
 }
 
-#[derive(Default)]
-pub(crate) struct TypeStore<'a> {
-	map: RwLock<HashMap<TypeId, Type<'a>>>,
-}
-
-impl Store {
-	pub fn get_type<'a, T: IsType<'a>>(&'a self) -> Type<'a> {
-		let id = T::type_id();
-		let types: &TypeStore<'a> = unsafe { std::mem::transmute(&self.types) };
-		let map = types.map.read().unwrap();
-		if let Some(typ) = map.get(&id) {
-			return *typ;
-		}
-		drop(map);
-
-		let mut map = types.map.write().unwrap();
-		let entry = map.entry(id).or_insert_with(|| {
-			let data = TypeData {
-				id,
-				store: self,
-				symbol: self.unique(T::name()),
-				as_traits: |ptr| unsafe { &*(ptr as *const T) },
-			};
-			let mut builder = TypeBuilder { data, tag: PhantomData };
-			T::init_type(&mut builder);
-
-			let data = self.add(builder.data);
-			Type { data }
-		});
-		*entry
-	}
-}
-
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct TypeId(usize);
 
-pub trait TypeInfo {
+pub trait IsType {
 	fn type_name() -> &'static str;
 
 	fn type_id() -> TypeId;
 }
 
-impl<T: ?Sized> TypeInfo for T {
+impl<T: ?Sized> IsType for T {
 	fn type_name() -> &'static str {
 		std::any::type_name::<Self>()
 	}
 
 	fn type_id() -> TypeId {
-		// we rely on the name being a distinct static pointer for each type
-		let id = Self::type_name().as_ptr() as usize;
+		let id = std::any::type_name::<T>() as *const str as *const () as usize;
 		TypeId(id)
 	}
 }
@@ -149,44 +144,58 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn type_singleton() {
-		let store = Store::new();
+	fn get_type() {
+		let ta_1 = TestA::get_type();
+		let ta_2 = TestA::get_type();
+		let tb_1 = TestB::get_type();
+		let tb_2 = TestB::get_type();
 
-		let ta = TestType::get(&store);
-		let tb = TestType::get(&store);
+		assert_eq!(ta_1, ta_2);
+		assert_eq!(tb_1, tb_2);
 
-		assert_eq!(ta.symbol().as_str(), "TestType");
-		assert_eq!(ta.symbol(), tb.symbol());
-		assert!(ta.symbol() != store.sym("TestType")); // name should be unique
-		assert_eq!(ta, tb);
+		assert!(ta_1.name().contains("TestA"));
+		assert!(ta_2.name().contains("TestA"));
+		assert!(tb_1.name().contains("TestB"));
+		assert!(tb_2.name().contains("TestB"));
+
+		assert!(ta_1 != tb_1);
 	}
 
 	#[test]
-	fn has_type_id() {
-		assert!(i32::type_id() == i32::type_id());
-		assert!(i64::type_id() == i64::type_id());
-		assert!(i32::type_id() != i64::type_id());
-		assert!(str::type_id() == str::type_id());
-		assert!(str::type_id() != String::type_id());
-		assert!(Marker::<i32>::type_id() != Marker::<i64>::type_id());
-		assert!(Marker::<&dyn A>::type_id() != Marker::<&dyn B>::type_id());
-		assert!(TestType::type_id() == TestType::type_id());
+	fn unique_types() {
+		assert!(Test::<i32>::get_type() == Test::<i32>::get_type());
+		assert!(Test::<i64>::get_type() == Test::<i64>::get_type());
+		assert!(Test::<i32>::get_type() != Test::<i64>::get_type());
+		assert!(Test::<&str>::get_type() == Test::<&str>::get_type());
+		assert!(Test::<&str>::get_type() != Test::<String>::get_type());
+
+		assert!(Test::<i32>::get_type().id() == Test::<i32>::type_id());
+		assert!(Test::<i64>::get_type().id() == Test::<i64>::type_id());
+		assert!(Test::<i32>::get_type().id() != Test::<i64>::type_id());
+		assert!(Test::<&str>::get_type().id() == Test::<&str>::type_id());
+		assert!(Test::<&str>::get_type().id() != Test::<String>::type_id());
 	}
 
-	struct TestType;
+	#[derive(Eq, PartialEq, Debug, Ord, PartialOrd, Hash)]
+	struct TestA;
 
-	impl<'a> IsType<'a> for TestType {
-		fn name() -> &'static str {
-			"TestType"
-		}
+	#[derive(Eq, PartialEq, Debug, Ord, PartialOrd, Hash)]
+	struct TestB;
+
+	impl HasTraits for TestA {}
+	impl HasTraits for TestB {}
+
+	impl IsAny for TestA {}
+	impl IsAny for TestB {}
+
+	#[derive(Eq, PartialEq, Debug, Ord, PartialOrd, Hash)]
+	struct Test<T>
+	where
+		T: Eq + PartialEq + Debug + Ord + PartialOrd + Hash,
+	{
+		_v: T,
 	}
 
-	impl<'a> HasTraits<'a> for TestType {}
-
-	struct Marker<T> {
-		tag: PhantomData<T>,
-	}
-
-	trait A {}
-	trait B {}
+	impl<T> HasTraits for Test<T> where T: Eq + PartialEq + Debug + Ord + PartialOrd + Hash {}
+	impl<T> IsAny for Test<T> where T: Eq + PartialEq + Debug + Ord + PartialOrd + Hash {}
 }

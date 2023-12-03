@@ -39,7 +39,7 @@ struct NodeData<'a> {
 }
 
 impl<'a> Node<'a> {
-	pub fn new<T: IsType<'a>>(store: &'a Store, key: Key<'a>, val: T, span: Span<'a>) -> Self {
+	pub fn new<T: IsValue<'a>>(store: &'a Store, key: Key<'a>, val: T, span: Span<'a>) -> Self {
 		let val = Value::new(store, val);
 		let data = store.add(NodeData { key, val, span });
 		Self { data }
