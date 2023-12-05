@@ -1,4 +1,4 @@
-use std::{cell::Cell, collections::HashMap};
+use std::collections::HashMap;
 
 use super::*;
 
@@ -25,8 +25,8 @@ impl<'a> Span<'a> {
 
 pub struct Table<'a, U> {
 	store: &'a Store,
-	queue: Vec<*mut BoundSegment<'a, U>>,
-	table: HashMap<Key<'a>, RangeTable<'a, U>>,
+	heap: SegmentHeap<'a, U>,
+	table: HashMap<Key<'a>, RangeTable<'a>>,
 }
 
 pub struct Binding<'a, U> {
@@ -34,6 +34,81 @@ pub struct Binding<'a, U> {
 	val: U,
 	ord: Order,
 	range: Range,
+}
+
+struct SegmentHeap<'a, U> {
+	queue: Vec<usize>,
+	segments: Vec<SegmentData<'a, U>>,
+	segment_pos: Vec<usize>,
+}
+
+impl<'a, U> SegmentHeap<'a, U> {
+	#[allow(unused)]
+	#[inline]
+	fn check_table(&self) {}
+
+	fn _check_table(&self) {
+		assert!(self.segment_pos.len() == self.segments.len());
+		for i in 0..self.queue.len() {
+			let seg = self.queue[i];
+			assert!(seg < self.segments.len());
+			assert!(self.segment_pos[seg] == i);
+		}
+
+		for (n, &pos) in self.segment_pos.iter().enumerate() {
+			if pos != NOT_QUEUED {
+				assert!(self.queue[pos] == n);
+			}
+		}
+	}
+
+	#[cfg(off)]
+	#[allow(unused)]
+	fn check_heap(&self) {
+		self.check_pos(0);
+	}
+
+	#[allow(unused)]
+	fn check_pos(&self, n: usize) {
+		let lhs = Self::lhs(n);
+		let rhs = Self::rhs(n);
+		if lhs < self.queue.len() {
+			assert!(self.heap_less(n, lhs));
+			self.check_pos(lhs);
+		}
+		if rhs < self.queue.len() {
+			assert!(self.heap_less(n, rhs));
+			self.check_pos(rhs);
+		}
+	}
+}
+
+impl<'a, U> IsHeap for SegmentHeap<'a, U> {
+	fn heap_len(&self) -> usize {
+		self.check_table();
+		self.queue.len()
+	}
+
+	fn heap_less(&self, a: usize, b: usize) -> bool {
+		self.check_table();
+		let a = &self.segments[self.queue[a]];
+		let b = &self.segments[self.queue[b]];
+		a.binding
+			.ord
+			.cmp(&b.binding.ord)
+			.then_with(|| a.binding.key.cmp(&b.binding.key))
+			.then_with(|| a.range.cmp(&b.range))
+			.is_le()
+	}
+
+	fn heap_swap(&mut self, a: usize, b: usize) {
+		self.check_table();
+		self.queue.swap(a, b);
+		let pa = self.queue[a];
+		let pb = self.queue[b];
+		self.segment_pos.swap(pa, pb);
+		self.check_table();
+	}
 }
 
 pub struct Segment<'a, U> {
@@ -70,27 +145,28 @@ impl<'a, U> Segment<'a, U> {
 	}
 }
 
-struct BoundSegment<'a, U> {
-	queue_index: Cell<usize>,
-	data: SegmentData<'a, U>,
-}
-
 struct SegmentData<'a, U> {
 	binding: &'a Binding<'a, U>,
 	range: Range,
 	nodes: Vec<Node<'a>>,
 }
 
-struct RangeTable<'a, U> {
+struct RangeTable<'a> {
 	unbound: Vec<Node<'a>>,
-	segments: Vec<*mut BoundSegment<'a, U>>,
+	segments: Vec<usize>,
 }
 
 impl<'a, U> Table<'a, U> {
+	const DEBUG: bool = false;
+
 	pub fn new(store: &'a Store) -> Self {
 		Self {
 			store,
-			queue: Default::default(),
+			heap: SegmentHeap {
+				queue: Default::default(),
+				segment_pos: Default::default(),
+				segments: Default::default(),
+			},
 			table: Default::default(),
 		}
 	}
@@ -100,18 +176,21 @@ impl<'a, U> Table<'a, U> {
 		if key == Key::None {
 			return;
 		}
+
 		let entry = self.table.entry(key).or_insert_with(|| Default::default());
-		let pos = node.pos();
-		let insert_at = entry.segments.partition_point(|&x| unsafe { &*x }.end() <= pos);
-		let unbound = if let Some(&segment) = entry.segments.get(insert_at) {
-			let segment = unsafe { &mut *segment };
-			if pos >= segment.sta() {
-				Self::insert_node(&mut segment.data.nodes, node, pos);
-				if segment.queue_index.get() == NOT_QUEUED {
-					let idx = self.queue.len();
-					segment.queue_index.set(idx);
-					self.queue.push(segment);
-					self.queue.shift_up(idx);
+		let offset = node.pos();
+		let insert_at = entry
+			.segments
+			.partition_point(|&idx| self.heap.segments[idx].end() <= offset);
+		let unbound = if let Some(&seg_index) = entry.segments.get(insert_at) {
+			let segment = &mut self.heap.segments[seg_index];
+			if offset >= segment.sta() {
+				Self::insert_node(&mut segment.nodes, node, offset);
+				if self.heap.segment_pos[seg_index] == NOT_QUEUED {
+					let queue_pos = self.heap.queue.len();
+					self.heap.segment_pos[seg_index] = queue_pos;
+					self.heap.queue.push(seg_index);
+					self.heap.shift_up(queue_pos);
 				}
 				None
 			} else {
@@ -121,29 +200,36 @@ impl<'a, U> Table<'a, U> {
 			Some(node)
 		};
 		if let Some(node) = unbound {
-			Self::insert_node(&mut entry.unbound, node, pos);
+			Self::insert_node(&mut entry.unbound, node, offset);
 		}
 	}
 
 	pub fn peek(&self) -> Option<&Segment<'a, U>> {
-		self.queue.first().map(|x| {
-			let data = &unsafe { &**x }.data;
-			unsafe { std::mem::transmute(data) }
-		})
+		let first = self.heap.queue.first().map(|&seg_index| &self.heap.segments[seg_index]);
+		unsafe { std::mem::transmute(first) }
 	}
 
 	pub fn shift(&mut self) -> Option<Segment<'a, U>> {
-		if self.queue.len() > 0 {
-			let last = self.queue.len() - 1;
-			self.queue.swap(0, last);
+		let len = self.heap.heap_len();
+		if len > 0 {
+			self.heap.heap_swap(0, len - 1);
 
-			let next = self.queue.pop();
-			self.queue.shift_down(0);
-			next.map(|segment| {
-				let segment = unsafe { &mut *segment };
-				segment.queue_index.set(NOT_QUEUED);
-				segment.take_segment()
-			})
+			let next = self.heap.queue.pop().unwrap();
+			self.heap.segment_pos[next] = NOT_QUEUED;
+
+			self.heap.shift_down(0);
+
+			let next = &mut self.heap.segments[next];
+			if Self::DEBUG {
+				println!("<<< {:?} @{:?} = {:?}", next.binding.key, next.range, next.nodes);
+			}
+
+			let next = SegmentData {
+				binding: next.binding,
+				range: next.range,
+				nodes: std::mem::take(&mut next.nodes),
+			};
+			Some(Segment { data: next })
 		} else {
 			None
 		}
@@ -154,6 +240,10 @@ impl<'a, U> Table<'a, U> {
 			return;
 		}
 
+		if Self::DEBUG {
+			println!("BIND {key:?} @{range:?}");
+		}
+
 		let binding = Binding { range, key, val, ord };
 		let binding = self.store.add(binding);
 		let table = self.table.entry(key).or_insert_with(|| Default::default());
@@ -161,25 +251,29 @@ impl<'a, U> Table<'a, U> {
 		let sta = range.sta;
 		let end = range.end;
 
-		let create_segment = |queue: &mut Vec<*mut BoundSegment<'a, U>>, data: SegmentData<'a, U>| {
-			let index = queue.len();
-			let segment = BoundSegment {
-				queue_index: index.into(),
-				data,
-			};
-			let segment = self.store.add(segment);
-			queue.push(segment);
-			queue.shift_up(index);
-			segment
+		let create_segment = |heap: &mut SegmentHeap<'a, U>, segment: SegmentData<'a, U>| {
+			if Self::DEBUG {
+				println!(
+					"NEW SEG {:?} {:?} = {:?}",
+					segment.binding.key, segment.range, segment.nodes
+				);
+			}
+			let queue_pos = heap.heap_len();
+			let seg_index = heap.segments.len();
+			heap.queue.push(seg_index);
+			heap.segments.push(segment);
+			heap.segment_pos.push(queue_pos);
+			heap.shift_up(queue_pos);
+			seg_index
 		};
 
 		let segments = &mut table.segments;
-		let queue = &mut self.queue;
-		let insert_idx = segments.partition_point(|&seg| unsafe { &*seg }.end() <= sta);
+		let heap = &mut self.heap;
+		let insert_pos = segments.partition_point(|&index| heap.segments[index].end() <= sta);
 
-		if insert_idx >= segments.len() {
+		if insert_pos >= segments.len() {
 			segments.push(create_segment(
-				queue,
+				heap,
 				SegmentData {
 					binding,
 					range,
@@ -188,12 +282,11 @@ impl<'a, U> Table<'a, U> {
 			));
 		} else {
 			let mut sta = sta;
-			let mut cur_idx = insert_idx;
+			let mut cur_idx = insert_pos;
 
 			while cur_idx < segments.len() && sta < end {
-				let cur_seg = unsafe { &mut *(segments[cur_idx]) };
-				let cur_sta = cur_seg.sta();
-				let cur_end = cur_seg.end();
+				let cur_sta = heap.segments[cur_idx].sta();
+				let cur_end = heap.segments[cur_idx].end();
 
 				let gap_before = cur_sta > sta;
 				if gap_before {
@@ -201,7 +294,7 @@ impl<'a, U> Table<'a, U> {
 					segments.insert(
 						cur_idx,
 						create_segment(
-							queue,
+							heap,
 							SegmentData {
 								binding,
 								range: Range { sta, end: seg_end },
@@ -214,22 +307,24 @@ impl<'a, U> Table<'a, U> {
 					continue;
 				}
 
-				let bind_is_more_specific = cur_seg.data.binding.range.contains(&binding.range);
+				let bind_is_more_specific = heap.segments[segments[cur_idx]].binding.range.contains(&binding.range);
 				if bind_is_more_specific {
 					let split_before = sta > cur_sta;
 					if split_before {
-						let split_at = cur_seg.data.nodes.partition_point(|node| node.pos() < sta);
-						let items_before = cur_seg.data.nodes.drain(..split_at).collect();
+						let split_at = heap.segments[segments[cur_idx]]
+							.nodes
+							.partition_point(|node| node.pos() < sta);
+						let items_before = heap.segments[segments[cur_idx]].nodes.drain(..split_at).collect();
 
-						cur_seg.data.range = Range { sta, end: cur_end };
-						queue.fix(cur_seg.queue_index.get());
+						heap.segments[segments[cur_idx]].range = Range { sta, end: cur_end };
+						heap.fix(heap.segment_pos[segments[cur_idx]]);
 
 						segments.insert(
 							cur_idx,
 							create_segment(
-								queue,
+								heap,
 								SegmentData {
-									binding: cur_seg.data.binding,
+									binding: heap.segments[segments[cur_idx]].binding,
 									range: Range { sta: cur_sta, end: sta },
 									nodes: items_before,
 								},
@@ -240,27 +335,29 @@ impl<'a, U> Table<'a, U> {
 
 					let split_after = end < cur_end;
 					if split_after {
-						let split_at = cur_seg.data.nodes.partition_point(|node| node.pos() < end);
-						let items_after = cur_seg.data.nodes.drain(split_at..).collect();
+						let split_at = heap.segments[segments[cur_idx]]
+							.nodes
+							.partition_point(|node| node.pos() < end);
+						let items_after = heap.segments[segments[cur_idx]].nodes.drain(split_at..).collect();
 						cur_idx += 1;
 						segments.insert(
 							cur_idx,
 							create_segment(
-								queue,
+								heap,
 								SegmentData {
-									binding: cur_seg.data.binding,
+									binding: heap.segments[segments[cur_idx]].binding,
 									range: Range { sta: end, end: cur_end },
 									nodes: items_after,
 								},
 							),
 						);
 
-						cur_seg.data.range = Range { sta, end };
-						cur_seg.data.binding = binding;
-						queue.fix(cur_seg.queue_index.get());
+						heap.segments[segments[cur_idx]].range = Range { sta, end };
+						heap.segments[segments[cur_idx]].binding = binding;
+						heap.fix(heap.segment_pos[cur_idx]);
 					} else {
-						cur_seg.data.binding = binding;
-						queue.fix(cur_seg.queue_index.get());
+						heap.segments[segments[cur_idx]].binding = binding;
+						heap.fix(heap.segment_pos[cur_idx]);
 					}
 				}
 
@@ -273,7 +370,7 @@ impl<'a, U> Table<'a, U> {
 				segments.insert(
 					cur_idx,
 					create_segment(
-						queue,
+						heap,
 						SegmentData {
 							binding,
 							range: Range { sta, end },
@@ -287,15 +384,21 @@ impl<'a, U> Table<'a, U> {
 		let unbound = &mut table.unbound;
 		let node_sta = unbound.partition_point(|x| x.pos() < sta);
 		let node_end = unbound[node_sta..].partition_point(|x| x.pos() < end) + node_sta;
-		let mut seg_index = insert_idx;
+		let mut seg_index = insert_pos;
 		for node in unbound.drain(node_sta..node_end) {
-			let mut cur = unsafe { &mut *segments[seg_index] };
-			let offset = node.pos();
-			while offset >= cur.end() {
-				seg_index += 1;
-				cur = unsafe { &mut *segments[seg_index] };
+			if Self::DEBUG {
+				println!("-- binding {node:?}");
 			}
-			Self::insert_node(&mut cur.data.nodes, node, offset);
+			let offset = node.pos();
+			while offset >= heap.segments[segments[seg_index]].end() {
+				seg_index += 1;
+			}
+
+			let seg = &mut heap.segments[segments[seg_index]];
+			if Self::DEBUG {
+				println!(".. to {:?} @{:?}", seg.binding.key, seg.range);
+			}
+			Self::insert_node(&mut seg.nodes, node, offset);
 		}
 	}
 
@@ -309,51 +412,17 @@ impl<'a, U> Table<'a, U> {
 	}
 }
 
-impl<'a, U> IsHeap for Vec<*mut BoundSegment<'a, U>> {
-	fn heap_len(&self) -> usize {
-		self.len()
-	}
-
-	fn heap_less(&self, a: usize, b: usize) -> bool {
-		let a = unsafe { &*self[a] };
-		let b = unsafe { &*self[b] };
-		a.data
-			.binding
-			.ord
-			.cmp(&b.data.binding.ord)
-			.then_with(|| a.data.binding.key.cmp(&b.data.binding.key))
-			.then_with(|| a.data.range.cmp(&b.data.range))
-			.is_le()
-	}
-
-	fn heap_swap(&mut self, a: usize, b: usize) {
-		self.swap(a, b);
-		unsafe { &*self[a] }.queue_index.set(a);
-		unsafe { &*self[b] }.queue_index.set(b);
-	}
-}
-
-impl<'a, U> BoundSegment<'a, U> {
+impl<'a, U> SegmentData<'a, U> {
 	pub fn sta(&self) -> usize {
-		self.data.range.sta
+		self.range.sta
 	}
 
 	pub fn end(&self) -> usize {
-		self.data.range.end
-	}
-
-	pub fn take_segment(&mut self) -> Segment<'a, U> {
-		Segment {
-			data: SegmentData {
-				binding: self.data.binding,
-				range: self.data.range,
-				nodes: std::mem::take(&mut self.data.nodes),
-			},
-		}
+		self.range.end
 	}
 }
 
-impl<'a, U> Default for RangeTable<'a, U> {
+impl<'a> Default for RangeTable<'a> {
 	fn default() -> Self {
 		Self {
 			unbound: Default::default(),
@@ -511,11 +580,12 @@ mod tests {
 		if false {
 			while let Some(next) = table.shift() {
 				println!(
-					"{} => {:?}\n  at {:?} / {:?}",
+					"{} => {:?}\n  at {:?} / {:?} -- {:?}",
 					next.value(),
 					next.nodes(),
 					next.bound_range(),
-					next.range()
+					next.range(),
+					next.order(),
 				);
 			}
 			return;
@@ -627,6 +697,8 @@ mod tests {
 		);
 	}
 
+	const SHOW_COUNT: bool = false;
+
 	#[test]
 	fn text_node_big() {
 		static STR: OnceLock<String> = OnceLock::new();
@@ -681,7 +753,17 @@ mod tests {
 	fn process<'a>(mut table: Table<'a, ()>) -> Vec<(char, usize, Span<'a>)> {
 		let store = table.store;
 		let mut output = Vec::new();
+
+		let mut count = 0;
+
 		while let Some(next) = table.shift() {
+			count += 1;
+			if SHOW_COUNT {
+				if count % 1000 == 0 {
+					println!("PROCESS {count}...");
+				}
+			}
+
 			match next.key() {
 				Key::Str("input") => {
 					for node in next.nodes() {

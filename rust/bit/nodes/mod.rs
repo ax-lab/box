@@ -15,7 +15,7 @@ pub enum Key<'a> {
 	Char(char),
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Order {
 	Never,
 	Pos(i32),
