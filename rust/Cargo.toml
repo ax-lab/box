@@ -13,3 +13,6 @@ members = [
 	"libs/nodes",
 	"libs/result",
 ]
+
+[profile.release]
+debug = true

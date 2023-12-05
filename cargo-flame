@@ -1,0 +1,3 @@
+#! /bin/bash
+
+cargo flamegraph --manifest-path rust/Cargo.toml "${@:1}"
