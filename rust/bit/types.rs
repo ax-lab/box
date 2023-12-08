@@ -1,7 +1,12 @@
 use std::{
 	cmp::Ordering as Cmp,
+	collections::HashMap,
 	fmt::{Debug, Display, Formatter},
 	hash::{Hash, Hasher},
+	sync::{
+		atomic::{AtomicUsize, Ordering},
+		Mutex, OnceLock,
+	},
 };
 
 use super::*;
@@ -30,6 +35,12 @@ pub struct Any(Type);
 
 impl Store {
 	pub fn any<'a, T: IsAny + 'a>(&'a self, data: T) -> &'a Any {
+		println!(
+			">>> ANY: {:?} = {:?} ({})",
+			T::type_id(),
+			T::get_type().id(),
+			T::get_type().name(),
+		);
 		let data = self.add(AnyCell(T::get_type(), data));
 		data.as_any()
 	}
@@ -82,7 +93,7 @@ impl Type {
 		self.data.id()
 	}
 
-	pub fn is<T>(&self) -> bool {
+	pub fn is<T: IsType>(&self) -> bool {
 		T::type_id() == self.id()
 	}
 }
@@ -122,6 +133,21 @@ impl Debug for Type {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct TypeId(usize);
 
+impl TypeId {
+	pub fn of<T: ?Sized>() -> Self {
+		static COUNTER: AtomicUsize = AtomicUsize::new(1);
+		static MAP: OnceLock<Mutex<HashMap<&str, usize>>> = OnceLock::new();
+
+		let map = MAP.get_or_init(|| Default::default());
+		let mut map = map.lock().unwrap();
+		let key = std::any::type_name::<T>();
+		let val = map
+			.entry(key)
+			.or_insert_with(|| COUNTER.fetch_add(1, Ordering::Relaxed));
+		TypeId(*val)
+	}
+}
+
 pub trait IsType {
 	fn type_name() -> &'static str;
 
@@ -134,8 +160,7 @@ impl<T: ?Sized> IsType for T {
 	}
 
 	fn type_id() -> TypeId {
-		let id = std::any::type_name::<T>() as *const str as *const () as usize;
-		TypeId(id)
+		TypeId::of::<T>()
 	}
 }
 
