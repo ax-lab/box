@@ -77,6 +77,10 @@ func (lex *Lexer) readNext(span *Span) (out Token) {
 		return out
 	}
 
+	if ok, tok := lex.MatchSymbol(span); ok {
+		return tok
+	}
+
 	return NewToken(TokenInvalid, span, nextLen)
 }
 

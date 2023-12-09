@@ -1,0 +1,72 @@
+<Word[0+3] = "let">
+    symbols.in:1:1
+<Word[4+1] = "x">
+    symbols.in:1:5
+<Symbol[6+1] = "=">
+    symbols.in:1:7
+<Symbol[8+1] = "(">
+    symbols.in:1:9
+<Word[9+1] = "a">
+    symbols.in:1:10
+<Symbol[11+1] = "+">
+    symbols.in:1:12
+<Word[13+1] = "b">
+    symbols.in:1:14
+<Symbol[14+1] = ")">
+    symbols.in:1:15
+<Symbol[16+1] = "*">
+    symbols.in:1:17
+<Symbol[18+1] = "(">
+    symbols.in:1:19
+<Word[19+1] = "c">
+    symbols.in:1:20
+<Symbol[21+1] = "-">
+    symbols.in:1:22
+<Word[23+1] = "d">
+    symbols.in:1:24
+<Symbol[24+1] = ")">
+    symbols.in:1:25
+<Break[25+1] = "\n">
+    symbols.in:1:26
+<Word[26+1] = "x">
+    symbols.in:2:1
+<Symbol[28+2] = "+=">
+    symbols.in:2:3
+<Symbol[31+2] = "--">
+    symbols.in:2:6
+<Symbol[33+1] = "-">
+    symbols.in:2:8
+<Word[34+1] = "x">
+    symbols.in:2:9
+<Symbol[35+2] = "++">
+    symbols.in:2:10
+<Symbol[37+1] = "+">
+    symbols.in:2:12
+<Word[38+1] = "x">
+    symbols.in:2:13
+<Symbol[39+1] = "[">
+    symbols.in:2:14
+<Symbol[40+1] = "{">
+    symbols.in:2:15
+<Word[41+1] = "a">
+    symbols.in:2:16
+<Symbol[42+1] = ",">
+    symbols.in:2:17
+<Word[43+1] = "b">
+    symbols.in:2:18
+<Symbol[44+1] = ",">
+    symbols.in:2:19
+<Word[45+1] = "c">
+    symbols.in:2:20
+<Symbol[46+1] = ",">
+    symbols.in:2:21
+<Word[47+1] = "d">
+    symbols.in:2:22
+<Symbol[48+1] = "}">
+    symbols.in:2:23
+<Symbol[49+1] = "]">
+    symbols.in:2:24
+<Symbol[50+1] = ";">
+    symbols.in:2:25
+<Break[51+1] = "\n">
+    symbols.in:2:26
