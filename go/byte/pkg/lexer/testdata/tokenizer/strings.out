@@ -1,0 +1,30 @@
+<Literal[0+5] = "'abc'">
+    strings.in:1:1
+<Break[5+1] = "\n">
+    strings.in:1:6
+<Literal[6+13] = "\"abc def 123\"">
+    strings.in:2:1
+<Break[19+1] = "\n">
+    strings.in:2:14
+<Literal[20+19] = "'\n\tline 1\n\tline 2\n'">
+    strings.in:3:1
+<Break[39+1] = "\n">
+    strings.in:6:2
+<Literal[40+10] = "'abc\\'def'">
+    strings.in:7:1
+<Break[50+1] = "\n">
+    strings.in:7:11
+<Literal[51+10] = "\"abc\\\"def\"">
+    strings.in:8:1
+<Break[61+1] = "\n">
+    strings.in:8:11
+<Literal[62+10] = "'abc''def'">
+    strings.in:9:1
+<Break[72+1] = "\n">
+    strings.in:9:11
+<Literal[73+10] = "\"abc\"\"def\"">
+    strings.in:10:1
+<Break[83+1] = "\n">
+    strings.in:10:11
+<Literal[84+20] = "\"unclosed\nnext line\n">
+    strings.in:11:1

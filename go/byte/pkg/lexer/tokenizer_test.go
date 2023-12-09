@@ -31,6 +31,8 @@ func newLexer() *lexer.Lexer {
 	lex.AddSymbols("++", "+=", "--", "-=")
 
 	lex.MatchNumbers()
+	lex.MatchQuotedString(`'`, true, `\`)
+	lex.MatchQuotedString(`"`, true, `\`)
 
 	return lex
 }

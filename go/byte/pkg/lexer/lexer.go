@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 type Lexer struct {
@@ -21,6 +22,43 @@ func New() *Lexer {
 func (lex *Lexer) MatchNumbers() {
 	lex.MatchRE(TokenNumber, `0[xX][_A-Za-z0-9]*`)
 	lex.MatchRE(TokenNumber, `[0-9][_0-9]*(\.[0-9][_0-9]*)?([eE][-+]?[0-9][_0-9]*)?[_A-Za-z0-9]*`)
+}
+
+func (lex *Lexer) MatchQuotedString(quote string, double bool, escape string) {
+	lex.matchers = append(lex.matchers, func(span *Span) (ok bool, out Token) {
+		text := span.Text()
+		if strings.HasPrefix(text, quote) {
+			esc, pos := false, len(quote)
+			for pos < len(text) {
+				next := text[pos:]
+				if esc {
+					esc = false
+					for _, chr := range next {
+						pos += utf8.RuneLen(chr)
+						break
+					}
+				} else if len(escape) > 0 && strings.HasPrefix(next, escape) {
+					esc, pos = true, pos+len(escape)
+				} else if strings.HasPrefix(next, quote) {
+					if strings.HasPrefix(next[len(quote):], quote) {
+						pos += len(quote) * 2
+					} else {
+						pos += len(quote)
+						break
+					}
+				} else {
+					for _, chr := range next {
+						pos += utf8.RuneLen(chr)
+						break
+					}
+				}
+			}
+
+			out = NewToken(TokenLiteral, span, pos)
+			return true, out
+		}
+		return
+	})
 }
 
 func (lex *Lexer) MatchRE(kind TokenKind, re string) {

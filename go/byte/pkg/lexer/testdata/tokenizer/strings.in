@@ -1,0 +1,12 @@
+'abc'
+"abc def 123"
+'
+	line 1
+	line 2
+'
+'abc\'def'
+"abc\"def"
+'abc''def'
+"abc""def"
+"unclosed
+next line
