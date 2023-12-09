@@ -1,0 +1,51 @@
+# Matching number tokens
+
+# dec
+1
+123
+1234567890
+
+# hex
+0xABCDEF
+0x1234567890
+0x0
+
+0X0
+0XABC
+
+0x
+0X
+
+# float
+1.0
+123.45
+
+1.0e123
+1.0e+123
+1.0e-123
+
+123E45
+123E+45
+123E-45
+
+# suffixes
+
+1abc
+1az
+1.0e
+1.0e1az
+
+0xABCzz_xyz
+
+# sep
+
+1_000_000
+1_abc
+
+1_000_.00_00_e+1_456
+
+# corner cases
+
+1._a
+1.0e_1
+1.0e+_123

@@ -90,19 +90,15 @@ func (span *Span) Advance(size int) {
 	wasCr := false
 	for _, chr := range span.Text()[:size] {
 		span.Sta += utf8.RuneLen(chr)
-		if chr == '\n' {
-			if !wasCr {
-				span.Row += 1
-				span.Col = 1
-				span.Ind = 1
-			} else {
+		if IsLineBreak(chr) {
+			if chr == '\n' && wasCr {
 				wasCr = false
+				continue
 			}
-		} else if chr == '\r' {
-			wasCr = true
+			wasCr = chr == '\r'
 			span.Row += 1
 			span.Col = 1
-			span.Ind = 0
+			span.Ind = 1
 		} else {
 			wasCr = false
 			indent := span.Col == span.Ind

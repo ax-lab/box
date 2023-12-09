@@ -8,12 +8,35 @@ import (
 )
 
 type Lexer struct {
+	Comment   string
 	symbol_re *regexp.Regexp
 	symbols   []string
+	matchers  []func(span *Span) (bool, Token)
 }
 
 func New() *Lexer {
 	return &Lexer{}
+}
+
+func (lex *Lexer) MatchNumbers() {
+	lex.MatchRE(TokenNumber, `0[xX][_A-Za-z0-9]*`)
+	lex.MatchRE(TokenNumber, `[0-9][_0-9]*(\.[0-9][_0-9]*)?([eE][-+]?[0-9][_0-9]*)?[_A-Za-z0-9]*`)
+}
+
+func (lex *Lexer) MatchRE(kind TokenKind, re string) {
+	if !strings.HasPrefix(re, "^") {
+		re = "^" + re
+	}
+	regex := regexp.MustCompile(re)
+	lex.matchers = append(lex.matchers, func(span *Span) (ok bool, out Token) {
+		text := span.Text()
+		size := len(regex.FindString(text))
+		if size > 0 {
+			out = NewToken(kind, span, size)
+			return true, out
+		}
+		return
+	})
 }
 
 func (lex *Lexer) AddSymbols(symbols ...string) {
@@ -50,12 +73,14 @@ func (lex *Lexer) MatchSymbol(span *Span) (ok bool, out Token) {
 }
 
 func IsSpace(chr rune) bool {
-	switch chr {
-	case '\r', '\n':
+	if IsLineBreak(chr) {
 		return false
-	default:
-		return unicode.IsSpace(chr)
 	}
+	return unicode.IsSpace(chr)
+}
+
+func IsLineBreak(chr rune) bool {
+	return chr == '\r' || chr == '\n'
 }
 
 type IdPos int

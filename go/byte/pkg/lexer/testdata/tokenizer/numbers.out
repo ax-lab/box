@@ -1,0 +1,182 @@
+<Comment[0+24] = "# Matching number tokens">
+    numbers.in:1:1
+<Break[24+1] = "\n">
+    numbers.in:1:25
+<Break[25+1] = "\n">
+    numbers.in:2:1
+<Comment[26+5] = "# dec">
+    numbers.in:3:1
+<Break[31+1] = "\n">
+    numbers.in:3:6
+<Number[32+1] = "1">
+    numbers.in:4:1
+<Break[33+1] = "\n">
+    numbers.in:4:2
+<Number[34+3] = "123">
+    numbers.in:5:1
+<Break[37+1] = "\n">
+    numbers.in:5:4
+<Number[38+10] = "1234567890">
+    numbers.in:6:1
+<Break[48+1] = "\n">
+    numbers.in:6:11
+<Break[49+1] = "\n">
+    numbers.in:7:1
+<Comment[50+5] = "# hex">
+    numbers.in:8:1
+<Break[55+1] = "\n">
+    numbers.in:8:6
+<Number[56+8] = "0xABCDEF">
+    numbers.in:9:1
+<Break[64+1] = "\n">
+    numbers.in:9:9
+<Number[65+12] = "0x1234567890">
+    numbers.in:10:1
+<Break[77+1] = "\n">
+    numbers.in:10:13
+<Number[78+3] = "0x0">
+    numbers.in:11:1
+<Break[81+1] = "\n">
+    numbers.in:11:4
+<Break[82+1] = "\n">
+    numbers.in:12:1
+<Number[83+3] = "0X0">
+    numbers.in:13:1
+<Break[86+1] = "\n">
+    numbers.in:13:4
+<Number[87+5] = "0XABC">
+    numbers.in:14:1
+<Break[92+1] = "\n">
+    numbers.in:14:6
+<Break[93+1] = "\n">
+    numbers.in:15:1
+<Number[94+2] = "0x">
+    numbers.in:16:1
+<Break[96+1] = "\n">
+    numbers.in:16:3
+<Number[97+2] = "0X">
+    numbers.in:17:1
+<Break[99+1] = "\n">
+    numbers.in:17:3
+<Break[100+1] = "\n">
+    numbers.in:18:1
+<Comment[101+7] = "# float">
+    numbers.in:19:1
+<Break[108+1] = "\n">
+    numbers.in:19:8
+<Number[109+3] = "1.0">
+    numbers.in:20:1
+<Break[112+1] = "\n">
+    numbers.in:20:4
+<Number[113+6] = "123.45">
+    numbers.in:21:1
+<Break[119+1] = "\n">
+    numbers.in:21:7
+<Break[120+1] = "\n">
+    numbers.in:22:1
+<Number[121+7] = "1.0e123">
+    numbers.in:23:1
+<Break[128+1] = "\n">
+    numbers.in:23:8
+<Number[129+8] = "1.0e+123">
+    numbers.in:24:1
+<Break[137+1] = "\n">
+    numbers.in:24:9
+<Number[138+8] = "1.0e-123">
+    numbers.in:25:1
+<Break[146+1] = "\n">
+    numbers.in:25:9
+<Break[147+1] = "\n">
+    numbers.in:26:1
+<Number[148+6] = "123E45">
+    numbers.in:27:1
+<Break[154+1] = "\n">
+    numbers.in:27:7
+<Number[155+7] = "123E+45">
+    numbers.in:28:1
+<Break[162+1] = "\n">
+    numbers.in:28:8
+<Number[163+7] = "123E-45">
+    numbers.in:29:1
+<Break[170+1] = "\n">
+    numbers.in:29:8
+<Break[171+1] = "\n">
+    numbers.in:30:1
+<Comment[172+10] = "# suffixes">
+    numbers.in:31:1
+<Break[182+1] = "\n">
+    numbers.in:31:11
+<Break[183+1] = "\n">
+    numbers.in:32:1
+<Number[184+4] = "1abc">
+    numbers.in:33:1
+<Break[188+1] = "\n">
+    numbers.in:33:5
+<Number[189+3] = "1az">
+    numbers.in:34:1
+<Break[192+1] = "\n">
+    numbers.in:34:4
+<Number[193+4] = "1.0e">
+    numbers.in:35:1
+<Break[197+1] = "\n">
+    numbers.in:35:5
+<Number[198+7] = "1.0e1az">
+    numbers.in:36:1
+<Break[205+1] = "\n">
+    numbers.in:36:8
+<Break[206+1] = "\n">
+    numbers.in:37:1
+<Number[207+11] = "0xABCzz_xyz">
+    numbers.in:38:1
+<Break[218+1] = "\n">
+    numbers.in:38:12
+<Break[219+1] = "\n">
+    numbers.in:39:1
+<Comment[220+5] = "# sep">
+    numbers.in:40:1
+<Break[225+1] = "\n">
+    numbers.in:40:6
+<Break[226+1] = "\n">
+    numbers.in:41:1
+<Number[227+9] = "1_000_000">
+    numbers.in:42:1
+<Break[236+1] = "\n">
+    numbers.in:42:10
+<Number[237+5] = "1_abc">
+    numbers.in:43:1
+<Break[242+1] = "\n">
+    numbers.in:43:6
+<Break[243+1] = "\n">
+    numbers.in:44:1
+<Number[244+20] = "1_000_.00_00_e+1_456">
+    numbers.in:45:1
+<Break[264+1] = "\n">
+    numbers.in:45:21
+<Break[265+1] = "\n">
+    numbers.in:46:1
+<Comment[266+14] = "# corner cases">
+    numbers.in:47:1
+<Break[280+1] = "\n">
+    numbers.in:47:15
+<Break[281+1] = "\n">
+    numbers.in:48:1
+<Number[282+1] = "1">
+    numbers.in:49:1
+<Symbol[283+1] = ".">
+    numbers.in:49:2
+<Word[284+2] = "_a">
+    numbers.in:49:3
+<Break[286+1] = "\n">
+    numbers.in:49:5
+<Number[287+6] = "1.0e_1">
+    numbers.in:50:1
+<Break[293+1] = "\n">
+    numbers.in:50:7
+<Number[294+4] = "1.0e">
+    numbers.in:51:1
+<Symbol[298+1] = "+">
+    numbers.in:51:5
+<Word[299+4] = "_123">
+    numbers.in:51:6
+<Break[303+1] = "\n">
+    numbers.in:51:10

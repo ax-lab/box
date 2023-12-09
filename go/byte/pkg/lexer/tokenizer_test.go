@@ -21,11 +21,16 @@ func TestTokenizer(t *testing.T) {
 }
 
 func newLexer() *lexer.Lexer {
-	lexer := lexer.New()
-	lexer.AddSymbols("(", ")", "[", "]", "{", "}")
-	lexer.AddSymbols(",", ".", ";")
-	lexer.AddSymbols("=", "+", "-", "*", "/")
-	lexer.AddSymbols("==", "!=", "<", ">", "<=", ">=")
-	lexer.AddSymbols("++", "+=", "--", "-=")
-	return lexer
+	lex := lexer.New()
+	lex.Comment = "#"
+
+	lex.AddSymbols("(", ")", "[", "]", "{", "}")
+	lex.AddSymbols(",", ".", ";")
+	lex.AddSymbols("=", "+", "-", "*", "/")
+	lex.AddSymbols("==", "!=", "<", ">", "<=", ">=")
+	lex.AddSymbols("++", "+=", "--", "-=")
+
+	lex.MatchNumbers()
+
+	return lex
 }

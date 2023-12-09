@@ -14,8 +14,7 @@ const (
 	TokenBreak   TokenKind = "Break"
 	TokenSymbol  TokenKind = "Symbol"
 	TokenWord    TokenKind = "Word"
-	TokenInteger TokenKind = "Integer"
-	TokenFloat   TokenKind = "Float"
+	TokenNumber  TokenKind = "Number"
 	TokenLiteral TokenKind = "Literal"
 	TokenComment TokenKind = "Comment"
 )
@@ -29,6 +28,16 @@ func NewToken(kind TokenKind, span *Span, len int) Token {
 	tokSpan := *span
 	tokSpan.End = tokSpan.Sta + len
 	span.Advance(len)
+	return Token{
+		Kind: kind,
+		Span: tokSpan,
+	}
+}
+
+func (span *Span) ReadToken(kind TokenKind, cond func(rune) bool) Token {
+	tokSpan := *span
+	span.SkipWhile(cond)
+	tokSpan.End = span.Sta
 	return Token{
 		Kind: kind,
 		Span: tokSpan,
@@ -75,6 +84,19 @@ func (lex *Lexer) readNext(span *Span) (out Token) {
 			return IsIdent(chr, ID_MID)
 		})
 		return out
+	}
+
+	text := span.Text()
+	if strings.HasPrefix(text, lex.Comment) {
+		return span.ReadToken(TokenComment, func(chr rune) bool {
+			return !IsLineBreak(chr)
+		})
+	}
+
+	for _, m := range lex.matchers {
+		if ok, tok := m(span); ok {
+			return tok
+		}
 	}
 
 	if ok, tok := lex.MatchSymbol(span); ok {
