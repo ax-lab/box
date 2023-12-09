@@ -8,12 +8,25 @@ import (
 
 type LineTest = func(input []string) any
 
-type lineTestRunner struct {
-	fn LineTest
+func CheckInput(t *testing.T, testdata string, fn FuncTest) {
+	runner := NewRunner(t, testdata, funcTestRunner{fn})
+	runner.Run()
 }
 
-func (runner lineTestRunner) Run(input Input) (out Output) {
-	output := runner.fn(input.Lines())
+func CheckLines(t *testing.T, testdata string, lineFunc LineTest) {
+	CheckInput(t, testdata, func(input Input) any {
+		return lineFunc(input.Lines())
+	})
+}
+
+type FuncTest = func(input Input) any
+
+type funcTestRunner struct {
+	fn FuncTest
+}
+
+func (runner funcTestRunner) Run(input Input) (out Output) {
+	output := runner.fn(input)
 	switch v := output.(type) {
 	case string:
 		out.StdOut = v
@@ -26,9 +39,4 @@ func (runner lineTestRunner) Run(input Input) (out Output) {
 		}
 	}
 	return
-}
-
-func CheckLines(t *testing.T, testdata string, lineFunc LineTest) {
-	runner := NewRunner(t, testdata, lineTestRunner{lineFunc})
-	runner.Run()
 }

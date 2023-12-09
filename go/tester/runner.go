@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+var Rewrite = false
+
 // Generic interface for a test runner.
 type TestRunner interface {
 	Run(input Input) (out Output)
@@ -160,7 +162,7 @@ func (run *RunOutput) checkResult() {
 	run.Success = run.Output.Error == nil
 
 	hasOutFiles := false
-	if run.Success && len(run.ExpectOutput) > 0 {
+	if run.Success && len(run.ExpectOutput) > 0 && !Rewrite {
 		hasOutFiles = true
 		run.Success = len(run.ExpectOutput) == len(run.ActualOutput)
 		for i := 0; run.Success && i < len(run.ActualOutput); i++ {
@@ -168,19 +170,19 @@ func (run *RunOutput) checkResult() {
 		}
 	}
 
-	if run.Success && run.Expected != nil {
+	if run.Success && run.Expected != nil && !Rewrite {
 		hasOutFiles = true
 		run.Success = assert.EqualValues(run.t, run.Expected, run.Output.Data, "output for %s", run.Name)
 	}
 
 	hasActualOutput := len(run.ActualOutput) > 0
 	hasJsonOutput := run.Output.Data != nil
-	if run.Success && !hasOutFiles && (hasActualOutput || hasJsonOutput) {
+	if run.Success && (!hasOutFiles || Rewrite) && (hasActualOutput || hasJsonOutput) {
 		if hasActualOutput {
-			util.WriteTextIf(run.outFile(), run.Output.StdOut)
+			util.WriteText(run.outFile(), run.Output.StdOut)
 		}
 		if hasJsonOutput {
-			util.WriteJsonIf(run.outJson(), run.Output.Data)
+			util.WriteJson(run.outJson(), run.Output.Data)
 		}
 	}
 

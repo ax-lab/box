@@ -131,23 +131,19 @@ func ReadJson(filename string, output any) any {
 	return output
 }
 
-func WriteTextIf(filepath string, text string) {
-	if !Exists(filepath) {
-		if !strings.HasSuffix(text, "\n") {
-			text += "\n"
-		}
-		err := os.WriteFile(filepath, ([]byte)(text), fs.ModePerm)
-		NoError(err, "WriteTextIf failed")
+func WriteText(filepath string, text string) {
+	if !strings.HasSuffix(text, "\n") {
+		text += "\n"
 	}
+	err := os.WriteFile(filepath, ([]byte)(text), fs.ModePerm)
+	NoError(err, "WriteTextIf failed")
 
 }
 
-func WriteJsonIf(filepath string, data any) {
-	if !Exists(filepath) {
-		json, err := json.MarshalIndent(data, "", "    ")
-		NoError(err, "WriteJson serialization failed")
-		WriteTextIf(filepath, string(json))
-	}
+func WriteJson(filepath string, data any) {
+	json, err := json.MarshalIndent(data, "", "    ")
+	NoError(err, "WriteJson serialization failed")
+	WriteText(filepath, string(json))
 }
 
 func Exists(filepath string) bool {
