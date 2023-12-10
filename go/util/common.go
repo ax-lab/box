@@ -34,3 +34,30 @@ func Try[T any](input T, err error) T {
 	NoError(err, "")
 	return input
 }
+
+func Assert(cond bool, msgAndArgs ...interface{}) {
+	if !cond {
+		msg := fmt.Sprint(msgAndArgs...)
+		if msg == "" {
+			msg = "assertion failed"
+		}
+		panic(msg)
+	}
+}
+
+type msgWithArgs struct {
+	msg  string
+	args []any
+}
+
+func (m msgWithArgs) String() string {
+	if len(m.args) == 0 {
+		return m.msg
+	} else {
+		return fmt.Sprintf(m.msg, m.args...)
+	}
+}
+
+func Msg(msg string, args ...any) fmt.Stringer {
+	return msgWithArgs{msg, args}
+}
