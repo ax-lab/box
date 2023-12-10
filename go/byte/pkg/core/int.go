@@ -25,6 +25,62 @@ type intType struct {
 	cast func(int64) any
 }
 
+func (t intType) Name() string {
+	return t.name
+}
+
+func (t intType) Repr() string {
+	return t.name
+}
+
+func (t intType) InitType(typ Type) {
+	m := typ.Map()
+	i32 := m.Int32()
+	i64 := m.Int64()
+
+	ints := []Type{i32, i64}
+	for _, a := range ints {
+		for _, b := range ints {
+			m.AddCompare(a, b, func(a, b Value) int {
+				va, vb := a.AsInt(), b.AsInt()
+				if va > vb {
+					return +1
+				} else if va < vb {
+					return -1
+				} else {
+					return 0
+				}
+			})
+		}
+	}
+}
+
+func (v Value) AsInt() int64 {
+	switch v := v.Any().(type) {
+	case int:
+		return int64(v)
+	case int8:
+		return int64(v)
+	case int16:
+		return int64(v)
+	case int32:
+		return int64(v)
+	case int64:
+		return int64(v)
+	case uint:
+		return int64(v)
+	case uint8:
+		return int64(v)
+	case uint16:
+		return int64(v)
+	case uint32:
+		return int64(v)
+	case uint64:
+		return int64(v)
+	}
+	return 0
+}
+
 func (t intType) NewValue(typ Type, args ...any) (Type, any) {
 	var value int64
 	switch len(args) {
@@ -60,14 +116,6 @@ func (t intType) NewValue(typ Type, args ...any) (Type, any) {
 	}
 
 	return typ, t.cast(value)
-}
-
-func (t intType) Name() string {
-	return t.name
-}
-
-func (t intType) Repr() string {
-	return t.name
 }
 
 func (t intType) DisplayValue(v Value) string {

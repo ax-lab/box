@@ -141,6 +141,16 @@ func (m *TypeMap) Key(types ...Type) TypeKey {
 }
 
 func (m *TypeMap) Get(def IsType) Type {
+	out, init := m.doGet(def)
+	if init {
+		if impl, ok := def.(interface{ InitType(Type) }); ok {
+			impl.InitType(out)
+		}
+	}
+	return out
+}
+
+func (m *TypeMap) doGet(def IsType) (out Type, init bool) {
 	name := def.Name()
 	repr := def.Repr()
 	util.Assert(repr != "", util.Msg("type with empty representation -- `%+v`", def))
@@ -154,7 +164,7 @@ func (m *TypeMap) Get(def IsType) Type {
 	defer m.typeMapRw.Unlock()
 
 	if typ, ok := m.typeMap[hash]; ok {
-		return Type{typ}
+		return Type{typ}, false
 	} else {
 		typ = &typeData{src: m, def: def, name: name, repr: repr, hash: hash}
 		typ.key = m.Key(Type{typ})
@@ -172,7 +182,7 @@ func (m *TypeMap) Get(def IsType) Type {
 			m.typeByName[name] = typ
 		}
 
-		return Type{typ}
+		return Type{typ}, true
 	}
 }
 
