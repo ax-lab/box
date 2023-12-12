@@ -8,10 +8,17 @@ import (
 
 type NodeList struct{}
 
-type Node struct{}
+type Node struct {
+	val core.Value
+	pos int
+}
+
+func NewNode(val core.Value, pos int) Node {
+	return Node{val, pos}
+}
 
 func (node Node) Offset() int {
-	panic("TODO")
+	return node.pos
 }
 
 type Segment struct{}
@@ -31,11 +38,51 @@ func (set *NodeSet) Shift() Segment {
 	panic("TODO")
 }
 
-type RangeTable struct{}
+type RangeTable struct {
+	segmentTable
+}
 
-func (tb *RangeTable) Set(sta, end int, val any) {}
+func (tb *RangeTable) Get(pos int) any {
+	cnt := len(tb.segments)
+	idx := sort.Search(cnt, func(i int) bool {
+		return tb.segments[i].end > pos
+	})
+	if idx < cnt && pos >= tb.segments[idx].sta {
+		return tb.segments[idx].bind.val
+	}
+	return nil
+}
 
-func (tb *RangeTable) Add(offset int, node any) {}
+func (tb *RangeTable) Set(sta, end int, val any) {
+	tb.bind(sta, end, val)
+}
+
+func (tb *RangeTable) Add(node Node) {
+	pos := node.Offset()
+	cnt := len(tb.segments)
+	idx := sort.Search(cnt, func(i int) bool {
+		return tb.segments[i].end > pos
+	})
+	if idx < cnt && pos >= tb.segments[idx].sta {
+		insertNode(&tb.segments[idx].list, node)
+	} else {
+		insertNode(&tb.unbound, node)
+	}
+}
+
+func insertNode(nodes *[]Node, node Node) {
+	offset := node.Offset()
+	list := *nodes
+	if len(list) == 0 || list[len(list)-1].Offset() <= offset {
+		list = append(list, node)
+	} else {
+		idx := sort.Search(len(list), func(i int) bool {
+			return list[i].Offset() > offset
+		})
+		list = append(append(list[:idx], node), list[idx:]...)
+	}
+	*nodes = list
+}
 
 type binding struct {
 	sta int
@@ -54,11 +101,6 @@ func (bind *binding) overrides(other *binding) bool {
 
 func (bind *binding) contains(other *binding) bool {
 	return bind.sta <= other.sta && other.end <= bind.end
-}
-
-type segmentTable struct {
-	segments []*segment
-	unbound  []Node
 }
 
 type segment struct {
@@ -81,6 +123,11 @@ func (seg *segment) splitOff(at int) (new *segment) {
 	new = &segment{at, seg.end, seg.bind, rhs}
 	seg.end, seg.list = at, lhs
 	return new
+}
+
+type segmentTable struct {
+	segments []*segment
+	unbound  []Node
 }
 
 func (tb *segmentTable) bind(sta, end int, val any) {
