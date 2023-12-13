@@ -9,9 +9,16 @@ import (
 )
 
 func TestRangeTable(t *testing.T) {
+	const NODES = 100
+
 	test := require.New(t)
 
 	tb := RangeTable{}
+	for i := 0; i < NODES; i++ {
+		node := NewNode(i+1, i)
+		tb.Add(node)
+	}
+
 	tb.Set(0, 5, "a")
 	tb.Set(5, 10, "b")
 	tb.Set(10, 15, "c")
@@ -23,6 +30,33 @@ func TestRangeTable(t *testing.T) {
 	check := func(expected any, sta, end int) {
 		for i := sta; i < end; i++ {
 			test.Equal(expected, tb.Get(i))
+		}
+
+		found := [NODES]bool{}
+		for _, it := range tb.segments {
+			expected := []any{}
+			actual := []any{}
+			for n := it.sta; n < it.end; n++ {
+				expected = append(expected, n)
+			}
+			for _, it := range it.list {
+				actual = append(actual, it.Offset())
+				found[it.Offset()] = true
+			}
+			test.Equal(expected, actual, "nodes for segment `%s` (%d-%d)", it.bind.val, it.sta, it.end)
+		}
+
+		prev := -1
+		for _, it := range tb.unbound {
+			pos := it.Offset()
+			test.True(pos > prev)
+			test.True(!found[pos])
+			prev = pos
+			found[pos] = true
+		}
+
+		for i, it := range found {
+			test.True(it, "node #%d not found", i)
 		}
 	}
 

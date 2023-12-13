@@ -9,16 +9,20 @@ import (
 type NodeList struct{}
 
 type Node struct {
-	val core.Value
+	val any
 	pos int
 }
 
-func NewNode(val core.Value, pos int) Node {
+func NewNode(val any, pos int) Node {
 	return Node{val, pos}
 }
 
 func (node Node) Offset() int {
 	return node.pos
+}
+
+func (node Node) Value() any {
+	return node.val
 }
 
 type Segment struct{}
