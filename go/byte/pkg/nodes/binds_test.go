@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"axlab.dev/byte/pkg/core"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,7 +16,7 @@ func TestRangeTable(t *testing.T) {
 
 	tb := RangeTable{}
 	for i := 0; i < NODES; i++ {
-		node := NewNode(i+1, i)
+		node := NewNode(core.Value{}, i)
 		tb.Add(node)
 	}
 

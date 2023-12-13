@@ -46,6 +46,10 @@ func (t Type) Name() string {
 	return t.data.name
 }
 
+func (t Type) IsZero() bool {
+	return t.data == nil
+}
+
 func (t Type) Hash() string {
 	return t.data.hash
 }

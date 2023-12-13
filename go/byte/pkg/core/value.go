@@ -26,6 +26,9 @@ type Value struct {
 }
 
 func NewValue(typ Type, args ...any) Value {
+	if typ.IsZero() {
+		panic("cannot create zero value")
+	}
 	if impl, ok := typ.Def().(CanCreate); ok {
 		typ, val := impl.NewValue(typ, args...)
 		return Value{typ, val}
@@ -39,6 +42,14 @@ func (v Value) Type() Type {
 
 func (v Value) Any() any {
 	return v.val
+}
+
+func (v Value) IsZero() bool {
+	return v.typ.IsZero()
+}
+
+func (v Value) Less(other Value) bool {
+	return v.Compare(other) < 0
 }
 
 func (v Value) String() string {

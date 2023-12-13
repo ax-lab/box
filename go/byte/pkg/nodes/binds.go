@@ -1,20 +1,33 @@
 package nodes
 
 import (
+	"container/heap"
 	"sort"
 
 	"axlab.dev/byte/pkg/core"
 )
 
+type WithKey interface {
+	Key() core.Value
+}
+
 type NodeList struct{}
 
 type Node struct {
-	val any
+	val core.Value
 	pos int
 }
 
-func NewNode(val any, pos int) Node {
+func NewNode(val core.Value, pos int) Node {
 	return Node{val, pos}
+}
+
+func (node Node) Key() core.Value {
+	if v, ok := node.val.Any().(WithKey); ok {
+		return v.Key()
+	} else {
+		return core.Value{}
+	}
 }
 
 func (node Node) Offset() int {
@@ -25,25 +38,123 @@ func (node Node) Value() any {
 	return node.val
 }
 
-type Segment struct{}
-
-type NodeSet struct {
+type Segment struct {
+	nodes []Node
+	bind  *binding
+	sta   int
+	end   int
 }
 
-func (set *NodeSet) Add(node Node) {}
+func newSegment(seg *segment) Segment {
+	return Segment{seg.list, seg.bind, seg.sta, seg.end}
+}
 
-func (set *NodeSet) Bind(sta, end int, key, val, ord core.Value) {}
+type NodeSet struct {
+	types    core.TypeMap
+	bindings map[core.Value]*RangeTable
+	queue    nodeSetQueue
+}
+
+func (set *NodeSet) Types() *core.TypeMap {
+	return &set.types
+}
+
+func (set *NodeSet) Add(node Node) {
+	if key := node.Key(); !key.IsZero() {
+		tb := set.getTable(key)
+		tb.Add(node)
+	}
+}
+
+func (set *NodeSet) Bind(sta, end int, key, val, ord core.Value) {
+	if !key.IsZero() {
+		tb := set.getTable(key)
+		tb.Bind(sta, end, key, val)
+	}
+}
 
 func (set *NodeSet) Peek() Segment {
-	panic("TODO")
+	set.shiftEmpty()
+	if set.queue.Len() > 0 {
+		seg := set.queue.segments[0]
+		return newSegment(seg)
+	}
+	return Segment{}
 }
 
 func (set *NodeSet) Shift() Segment {
+	set.shiftEmpty()
+	if set.queue.Len() > 0 {
+		seg := set.queue.segments[0]
+		out := newSegment(seg)
+		seg.list = nil
+		heap.Pop(&set.queue)
+		return out
+	}
+	return Segment{}
+}
+
+func (set *NodeSet) PopUnbound() (keys []core.Value, nodes [][]Node) {
 	panic("TODO")
 }
 
+func (set *NodeSet) shiftEmpty() {
+	for set.queue.Len() > 0 && len(set.queue.segments[0].list) == 0 {
+		heap.Pop(&set.queue)
+	}
+}
+
+type nodeSetQueue struct {
+	segments []*segment
+}
+
+func (q *nodeSetQueue) Len() int {
+	return len(q.segments)
+}
+
+func (q *nodeSetQueue) Less(i, j int) bool {
+	si, sj := q.segments[i], q.segments[j]
+	return si.bind.key.Less(sj.bind.key)
+}
+
+func (q *nodeSetQueue) Swap(i, j int) {
+	q.segments[i], q.segments[j] = q.segments[j], q.segments[i]
+	q.segments[i].queue = i
+	q.segments[j].queue = j
+}
+
+func (q *nodeSetQueue) Push(x any) {
+	seg := x.(*segment)
+	seg.queue = q.Len()
+	q.segments = append(q.segments, seg)
+}
+
+func (q *nodeSetQueue) Pop() any {
+	n := len(q.segments)
+	s := q.segments[n]
+	q.segments = q.segments[:n-1]
+	s.queue = -1
+	return s
+}
+
+func (set *NodeSet) getTable(key core.Value) *RangeTable {
+	if tb, ok := set.bindings[key]; ok {
+		return tb
+	}
+
+	if set.bindings == nil {
+		set.bindings = make(map[core.Value]*RangeTable)
+	}
+
+	tb := &RangeTable{queue: &set.queue}
+	set.bindings[key] = tb
+	return tb
+}
+
 type RangeTable struct {
-	segmentTable
+	queue    *nodeSetQueue
+	segments []*segment
+	unbound  []Node
 }
 
 func (tb *RangeTable) Get(pos int) any {
@@ -57,8 +168,20 @@ func (tb *RangeTable) Get(pos int) any {
 	return nil
 }
 
+func (tb *RangeTable) Bind(sta, end int, key, val core.Value) {
+	if sta >= end {
+		return
+	}
+	bind := &binding{sta, end, val, key}
+	tb.addBinding(bind)
+}
+
 func (tb *RangeTable) Set(sta, end int, val any) {
-	tb.bind(sta, end, val)
+	if sta >= end {
+		return
+	}
+	bind := &binding{sta, end, val, core.Value{}}
+	tb.addBinding(bind)
 }
 
 func (tb *RangeTable) Add(node Node) {
@@ -69,6 +192,7 @@ func (tb *RangeTable) Add(node Node) {
 	})
 	if idx < cnt && pos >= tb.segments[idx].sta {
 		insertNode(&tb.segments[idx].list, node)
+		tb.segments[idx].ensureQueued(tb.queue)
 	} else {
 		insertNode(&tb.unbound, node)
 	}
@@ -92,6 +216,7 @@ type binding struct {
 	sta int
 	end int
 	val any
+	key core.Value
 }
 
 func (bind *binding) overrides(other *binding) bool {
@@ -108,15 +233,30 @@ func (bind *binding) contains(other *binding) bool {
 }
 
 type segment struct {
-	sta  int
-	end  int
-	bind *binding
-	list []Node
+	sta   int
+	end   int
+	bind  *binding
+	list  []Node
+	queue int
 }
 
-func (seg *segment) updateQueuePos() {}
+func (seg *segment) updateQueuePos(q *nodeSetQueue) {
+	if seg.queue >= 0 {
+		heap.Fix(q, seg.queue)
+	}
+}
 
-func (seg *segment) removeQueuePos() {}
+func (seg *segment) ensureQueued(q *nodeSetQueue) {
+	if seg.queue < 0 {
+		heap.Push(q, seg)
+	}
+}
+
+func (seg *segment) removeQueuePos(q *nodeSetQueue) {
+	if seg.queue >= 0 {
+		heap.Remove(q, seg.queue)
+	}
+}
 
 func (seg *segment) splitOff(at int) (new *segment) {
 	if at <= seg.sta || seg.end <= at {
@@ -124,22 +264,13 @@ func (seg *segment) splitOff(at int) (new *segment) {
 	}
 
 	lhs, rhs := splitNodes(seg.list, at)
-	new = &segment{at, seg.end, seg.bind, rhs}
+	new = &segment{at, seg.end, seg.bind, rhs, -1}
 	seg.end, seg.list = at, lhs
 	return new
 }
 
-type segmentTable struct {
-	segments []*segment
-	unbound  []Node
-}
-
-func (tb *segmentTable) bind(sta, end int, val any) {
-	if sta >= end {
-		return
-	}
-
-	new_bind := &binding{sta, end, val}
+func (tb *RangeTable) addBinding(new_bind *binding) {
+	sta, end := new_bind.sta, new_bind.end
 	pre, mid, pos := splitSegments(tb.segments, sta, end)
 
 	tb.segments = append([]*segment(nil), pre...)
@@ -156,20 +287,20 @@ func (tb *segmentTable) bind(sta, end int, val any) {
 				last.end = seg.end
 				last.list = append(last.list, seg.list...)
 				seg.list = nil
-				seg.removeQueuePos()
+				seg.removeQueuePos(tb.queue)
 				return last
 			}
 		}
 
 		tb.segments = append(tb.segments, seg)
-		seg.updateQueuePos()
+		seg.updateQueuePos(tb.queue)
 		return seg
 	}
 
 	cur := sta
 	for _, next := range mid {
 		if has_gap := next.sta > cur; has_gap {
-			push(&segment{cur, next.sta, new_bind, nil}, true)
+			push(&segment{cur, next.sta, new_bind, nil, -1}, true)
 			cur = next.sta
 		}
 
@@ -195,7 +326,7 @@ func (tb *segmentTable) bind(sta, end int, val any) {
 	}
 
 	if cur < end {
-		push(&segment{cur, end, new_bind, nil}, true)
+		push(&segment{cur, end, new_bind, nil, -1}, true)
 	}
 
 	tb.segments = append(tb.segments, pos...)
