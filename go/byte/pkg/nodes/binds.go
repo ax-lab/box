@@ -11,35 +11,8 @@ type WithKey interface {
 	Key() core.Value
 }
 
-type NodeList struct{}
-
-type Node struct {
-	val core.Value
-	pos int
-}
-
-func NewNode(val core.Value, pos int) Node {
-	return Node{val, pos}
-}
-
-func (node Node) Key() core.Value {
-	if v, ok := node.val.Any().(WithKey); ok {
-		return v.Key()
-	} else {
-		return core.Value{}
-	}
-}
-
-func (node Node) Offset() int {
-	return node.pos
-}
-
-func (node Node) Value() any {
-	return node.val
-}
-
 type Segment struct {
-	nodes []Node
+	nodes []*Node
 	bind  *binding
 	sta   int
 	end   int
@@ -59,7 +32,7 @@ func (set *NodeSet) Types() *core.TypeMap {
 	return &set.types
 }
 
-func (set *NodeSet) Add(node Node) {
+func (set *NodeSet) Add(node *Node) {
 	if key := node.Key(); !key.IsZero() {
 		tb := set.getTable(key)
 		tb.Add(node)
@@ -94,7 +67,7 @@ func (set *NodeSet) Shift() Segment {
 	return Segment{}
 }
 
-func (set *NodeSet) PopUnbound() (keys []core.Value, nodes [][]Node) {
+func (set *NodeSet) PopUnbound() (keys []core.Value, nodes [][]*Node) {
 	panic("TODO")
 }
 
@@ -154,7 +127,7 @@ func (set *NodeSet) getTable(key core.Value) *RangeTable {
 type RangeTable struct {
 	queue    *nodeSetQueue
 	segments []*segment
-	unbound  []Node
+	unbound  []*Node
 }
 
 func (tb *RangeTable) Get(pos int) any {
@@ -184,7 +157,7 @@ func (tb *RangeTable) Set(sta, end int, val any) {
 	tb.addBinding(bind)
 }
 
-func (tb *RangeTable) Add(node Node) {
+func (tb *RangeTable) Add(node *Node) {
 	pos := node.Offset()
 	cnt := len(tb.segments)
 	idx := sort.Search(cnt, func(i int) bool {
@@ -198,7 +171,7 @@ func (tb *RangeTable) Add(node Node) {
 	}
 }
 
-func insertNode(nodes *[]Node, node Node) {
+func insertNode(nodes *[]*Node, node *Node) {
 	offset := node.Offset()
 	list := *nodes
 	if len(list) == 0 || list[len(list)-1].Offset() <= offset {
@@ -236,7 +209,7 @@ type segment struct {
 	sta   int
 	end   int
 	bind  *binding
-	list  []Node
+	list  []*Node
 	queue int
 }
 
@@ -347,7 +320,7 @@ func splitSegments(segments []*segment, sta, end int) (pre, mid, pos []*segment)
 	return
 }
 
-func extractNodes(nodes *[]Node, sta, end int) (del []Node) {
+func extractNodes(nodes *[]*Node, sta, end int) (del []*Node) {
 	out := *nodes
 	count := len(out)
 	idx_sta := sort.Search(count, func(i int) bool {
@@ -364,7 +337,7 @@ func extractNodes(nodes *[]Node, sta, end int) (del []Node) {
 	return del
 }
 
-func splitNodes(nodes []Node, at int) (lhs, rhs []Node) {
+func splitNodes(nodes []*Node, at int) (lhs, rhs []*Node) {
 	len := len(nodes)
 	idx := sort.Search(len, func(i int) bool {
 		return nodes[i].Offset() >= at
@@ -372,6 +345,6 @@ func splitNodes(nodes []Node, at int) (lhs, rhs []Node) {
 
 	// don't share the underlying storage since those are writable
 	lhs = nodes[:idx]
-	rhs = append([]Node(nil), nodes[idx:]...)
+	rhs = append([]*Node(nil), nodes[idx:]...)
 	return
 }
