@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"axlab.dev/byte/pkg/core"
 )
 
 const DefaultTabWidth = 4
@@ -12,6 +14,7 @@ type Source struct {
 	Name string
 	Text string
 	TabW int
+	Sort int // user defined global ordering for sources
 }
 
 func (src *Source) TabWidth() int {
@@ -19,6 +22,10 @@ func (src *Source) TabWidth() int {
 		return DefaultTabWidth
 	}
 	return src.TabW
+}
+
+func (src *Source) String() string {
+	return fmt.Sprintf("Source(`%s` with %d bytes)", src.Name, len(src.Text))
 }
 
 type Span struct {
@@ -45,11 +52,15 @@ func (span *Span) Text() string {
 	return span.Src.Text[span.Sta:span.End]
 }
 
-func (span *Span) Location() string {
-	return fmt.Sprintf("%s:%d:%d", span.Src.Name, span.Row, span.Col)
+func (span Span) Location() string {
+	out := fmt.Sprintf("%s:%d:%d", span.Src.Name, span.Row, span.Col)
+	if len := span.Len(); len > 0 {
+		out += fmt.Sprintf("+%d", len)
+	}
+	return out
 }
 
-func (span *Span) String() string {
+func (span Span) String() string {
 	return fmt.Sprintf("%d+%d", span.Sta, span.Len())
 }
 
@@ -109,4 +120,32 @@ func (span *Span) Advance(size int) {
 			}
 		}
 	}
+}
+
+type sourceType struct{}
+
+func (src *Source) AsValue(typ *core.TypeMap) core.Value {
+	t := typ.Get(sourceType{})
+	return core.NewValue(t, src)
+}
+
+func (t sourceType) Name() string {
+	return "Source"
+}
+
+func (t sourceType) Repr() string {
+	return t.Name()
+}
+
+func (t sourceType) NewValue(typ core.Type, args ...any) (core.Type, any) {
+	if len(args) == 1 {
+		if v, ok := args[0].(*Source); ok {
+			return typ, v
+		}
+	}
+	return core.InitError("invalid arguments", typ, args)
+}
+
+func (t sourceType) DisplayValue(v core.Value) string {
+	return v.Any().(*Source).String()
 }

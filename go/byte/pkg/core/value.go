@@ -8,18 +8,6 @@ func InitError(msg string, typ Type, args []any) (Type, any) {
 	panic(fmt.Sprintf("init `%s`: %s -- %+v", typ, msg, args))
 }
 
-type CanCreate interface {
-	NewValue(typ Type, v ...any) (Type, any)
-}
-
-type CanDisplay interface {
-	DisplayValue(v Value) string
-}
-
-type CanDebug interface {
-	DebugValue(v Value) string
-}
-
 type Value struct {
 	typ Type
 	val any
@@ -53,6 +41,10 @@ func (v Value) Less(other Value) bool {
 }
 
 func (v Value) String() string {
+	if v.IsZero() {
+		return "(none)"
+	}
+
 	if impl, ok := v.typ.Def().(CanDisplay); ok {
 		return impl.DisplayValue(v)
 	} else {
@@ -62,8 +54,8 @@ func (v Value) String() string {
 
 func (v Value) Debug() string {
 	if impl, ok := v.typ.Def().(CanDebug); ok {
-		return fmt.Sprintf("[%s](%s)", v.typ, impl.DebugValue(v))
+		return fmt.Sprintf("<%s>(%s)", v.typ, impl.DebugValue(v))
 	} else {
-		return fmt.Sprintf("[%s](%+v)", v.typ, v.val)
+		return fmt.Sprintf("<%s>(%+v)", v.typ, v.val)
 	}
 }

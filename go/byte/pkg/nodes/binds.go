@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"axlab.dev/byte/pkg/core"
+	"axlab.dev/byte/pkg/lexer"
 )
 
 type WithKey interface {
@@ -25,11 +26,11 @@ func newSegment(seg *segment) Segment {
 type NodeSet struct {
 	types    *core.TypeMap
 	bindings map[core.Value]*RangeTable
-	queue    nodeSetQueue
+	queue    *nodeSetQueue
 }
 
-func newNodeSet(types *core.TypeMap) *NodeSet {
-	return &NodeSet{types: types}
+func newNodeSet(types *core.TypeMap, queue *nodeSetQueue) *NodeSet {
+	return &NodeSet{types: types, queue: queue}
 }
 
 func (set *NodeSet) Types() *core.TypeMap {
@@ -43,32 +44,11 @@ func (set *NodeSet) Add(node *Node) {
 	}
 }
 
-func (set *NodeSet) Bind(sta, end int, key, val, ord core.Value) {
+func (set *NodeSet) Bind(span lexer.Span, key, val, ord core.Value) {
 	if !key.IsZero() {
 		tb := set.getTable(key)
-		tb.Bind(sta, end, key, val)
+		tb.Bind(span, key, val)
 	}
-}
-
-func (set *NodeSet) Peek() Segment {
-	set.shiftEmpty()
-	if set.queue.Len() > 0 {
-		seg := set.queue.segments[0]
-		return newSegment(seg)
-	}
-	return Segment{}
-}
-
-func (set *NodeSet) Shift() Segment {
-	set.shiftEmpty()
-	if set.queue.Len() > 0 {
-		seg := set.queue.segments[0]
-		out := newSegment(seg)
-		seg.list = nil
-		heap.Pop(&set.queue)
-		return out
-	}
-	return Segment{}
 }
 
 type unboundSort struct {
@@ -102,14 +82,29 @@ func (set *NodeSet) PopUnbound() (keys []core.Value, nodes [][]*Node) {
 	return
 }
 
-func (set *NodeSet) shiftEmpty() {
-	for set.queue.Len() > 0 && len(set.queue.segments[0].list) == 0 {
-		heap.Pop(&set.queue)
-	}
-}
-
 type nodeSetQueue struct {
 	segments []*segment
+}
+
+func (q *nodeSetQueue) Peek() Segment {
+	q.shiftEmpty()
+	if q.Len() > 0 {
+		seg := q.segments[0]
+		return newSegment(seg)
+	}
+	return Segment{}
+}
+
+func (q *nodeSetQueue) Shift() Segment {
+	q.shiftEmpty()
+	if q.Len() > 0 {
+		seg := q.segments[0]
+		out := newSegment(seg)
+		seg.list = nil
+		heap.Pop(q)
+		return out
+	}
+	return Segment{}
 }
 
 func (q *nodeSetQueue) Len() int {
@@ -117,8 +112,25 @@ func (q *nodeSetQueue) Len() int {
 }
 
 func (q *nodeSetQueue) Less(i, j int) bool {
-	si, sj := q.segments[i], q.segments[j]
-	return si.bind.key.Less(sj.bind.key)
+	b0, b1 := q.segments[i].bind, q.segments[j].bind
+
+	if key := b0.key.Compare(b1.key); key != 0 {
+		return key < 0
+	}
+
+	if b0.src.Sort != b1.src.Sort {
+		return b0.src.Sort < b1.src.Sort
+	}
+
+	if b0.sta != b1.sta {
+		return b0.sta < b1.sta
+	}
+
+	if b0.end != b1.end {
+		return b0.end < b1.end
+	}
+
+	return false
 }
 
 func (q *nodeSetQueue) Swap(i, j int) {
@@ -141,6 +153,12 @@ func (q *nodeSetQueue) Pop() any {
 	return s
 }
 
+func (q *nodeSetQueue) shiftEmpty() {
+	for q.Len() > 0 && len(q.segments[0].list) == 0 {
+		heap.Pop(q)
+	}
+}
+
 func (set *NodeSet) getTable(key core.Value) *RangeTable {
 	if tb, ok := set.bindings[key]; ok {
 		return tb
@@ -150,7 +168,7 @@ func (set *NodeSet) getTable(key core.Value) *RangeTable {
 		set.bindings = make(map[core.Value]*RangeTable)
 	}
 
-	tb := &RangeTable{queue: &set.queue}
+	tb := &RangeTable{queue: set.queue}
 	set.bindings[key] = tb
 	return tb
 }
@@ -161,7 +179,7 @@ type RangeTable struct {
 	unbound  []*Node
 }
 
-func (tb *RangeTable) Get(pos int) any {
+func (tb *RangeTable) Get(pos int) core.Value {
 	cnt := len(tb.segments)
 	idx := sort.Search(cnt, func(i int) bool {
 		return tb.segments[i].end > pos
@@ -169,22 +187,15 @@ func (tb *RangeTable) Get(pos int) any {
 	if idx < cnt && pos >= tb.segments[idx].sta {
 		return tb.segments[idx].bind.val
 	}
-	return nil
+	return core.Value{}
 }
 
-func (tb *RangeTable) Bind(sta, end int, key, val core.Value) {
+func (tb *RangeTable) Bind(span lexer.Span, key, val core.Value) {
+	sta, end := span.Sta, span.End
 	if sta >= end {
 		return
 	}
-	bind := &binding{sta, end, val, key}
-	tb.addBinding(bind)
-}
-
-func (tb *RangeTable) Set(sta, end int, val any) {
-	if sta >= end {
-		return
-	}
-	bind := &binding{sta, end, val, core.Value{}}
+	bind := &binding{sta, end, span.Src, val, key}
 	tb.addBinding(bind)
 }
 
@@ -219,7 +230,8 @@ func insertNode(nodes *[]*Node, node *Node) {
 type binding struct {
 	sta int
 	end int
-	val any
+	src *lexer.Source
+	val core.Value
 	key core.Value
 }
 

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"axlab.dev/byte/pkg/core"
+	"axlab.dev/byte/pkg/lexer"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,21 +17,31 @@ func TestRangeTable(t *testing.T) {
 
 	tb := RangeTable{}
 	for i := 0; i < NODES; i++ {
-		node := NewNode(core.Value{}, i)
+		node := NewNode(core.Value{}, lexer.Span{Sta: i})
 		tb.Add(node)
 	}
 
-	tb.Set(0, 5, "a")
-	tb.Set(5, 10, "b")
-	tb.Set(10, 15, "c")
-	tb.Set(15, 20, "d")
-	tb.Set(20, 25, "e")
+	typ := core.TypeMap{}
+
+	src := &lexer.Source{}
+	set := func(sta, end int, val string) {
+		span := src.Span()
+		span.Sta = sta
+		span.End = end
+		tb.Bind(span, core.Value{}, core.NewValue(typ.Str(), val))
+	}
+
+	set(0, 5, "a")
+	set(5, 10, "b")
+	set(10, 15, "c")
+	set(15, 20, "d")
+	set(20, 25, "e")
 
 	dump(t, tb.segments)
 
 	check := func(expected any, sta, end int) {
 		for i := sta; i < end; i++ {
-			test.Equal(expected, tb.Get(i))
+			test.Equal(expected, tb.Get(i).Any())
 		}
 
 		found := [NODES]bool{}
@@ -68,25 +79,25 @@ func TestRangeTable(t *testing.T) {
 	check("e", 20, 25)
 	check(nil, 25, 30)
 
-	tb.Set(0, 2, "ax")
-	tb.Set(3, 5, "ay")
+	set(0, 2, "ax")
+	set(3, 5, "ay")
 
 	check("ax", 0, 2)
 	check("ay", 3, 5)
 	check("a", 2, 3)
 	check("b", 5, 10)
 
-	tb.Set(6, 9, "bx")
+	set(6, 9, "bx")
 	check("bx", 6, 9)
 	check("b", 5, 6)
 	check("b", 9, 10)
 
-	tb.Set(12, 17, "cd")
+	set(12, 17, "cd")
 	check("cd", 12, 17)
 	check("c", 10, 12)
 	check("d", 17, 20)
 
-	tb.Set(50, 60, "xx")
+	set(50, 60, "xx")
 	check("xx", 50, 60)
 	check(nil, 40, 50)
 	check(nil, 60, 70)

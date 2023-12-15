@@ -1,9 +1,12 @@
 package nodes
 
 import (
+	"fmt"
 	"slices"
+	"strings"
 
 	"axlab.dev/byte/pkg/core"
+	"axlab.dev/byte/pkg/lexer"
 	"axlab.dev/util"
 )
 
@@ -82,15 +85,32 @@ func (ls *NodeList) updateFrom(index int) {
 	}
 }
 
+func (ls *NodeList) String() string {
+	out := strings.Builder{}
+	out.WriteString("{")
+	for i, it := range ls.nodes {
+		out.WriteString("\n    ")
+		out.WriteString(fmt.Sprintf("[%03d] = ", i))
+		out.WriteString(util.Indented(fmt.Sprintf("%s -- %s", it.String(), it.Span().Location())))
+	}
+	if len(ls.nodes) > 0 {
+		out.WriteString("\n")
+	} else {
+		out.WriteString(" ")
+	}
+	out.WriteString("}")
+	return out.String()
+}
+
 type Node struct {
 	val   core.Value
-	pos   int
+	span  lexer.Span
 	list  *NodeList
 	index int
 }
 
-func NewNode(val core.Value, pos int) *Node {
-	return &Node{val, pos, nil, -1}
+func NewNode(val core.Value, span lexer.Span) *Node {
+	return &Node{val, span, nil, -1}
 }
 
 func (node *Node) List() *NodeList {
@@ -123,10 +143,18 @@ func (node *Node) Key() core.Value {
 	}
 }
 
+func (node *Node) Span() lexer.Span {
+	return node.span
+}
+
 func (node *Node) Offset() int {
-	return node.pos
+	return node.span.Sta
 }
 
 func (node *Node) Value() core.Value {
 	return node.val
+}
+
+func (node *Node) String() string {
+	return node.val.String()
 }

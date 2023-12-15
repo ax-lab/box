@@ -46,6 +46,14 @@ func Text(input string) string {
 }
 
 func Indent(input string, prefix ...string) string {
+	return doIndent(true, input, prefix...)
+}
+
+func Indented(input string, prefix ...string) string {
+	return doIndent(false, input, prefix...)
+}
+
+func doIndent(firstLine bool, input string, prefix ...string) string {
 	tab := strings.Join(prefix, "")
 	if len(tab) == 0 {
 		tab = "    "
@@ -55,8 +63,10 @@ func Indent(input string, prefix ...string) string {
 	for _, it := range Lines(input) {
 		if out.Len() > 0 {
 			out.WriteString("\n")
+			out.WriteString(tab)
+		} else if firstLine {
+			out.WriteString(tab)
 		}
-		out.WriteString(tab)
 		out.WriteString(it)
 	}
 

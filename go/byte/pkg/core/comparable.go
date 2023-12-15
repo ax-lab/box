@@ -23,5 +23,9 @@ func (a Value) Compare(b Value) int {
 		return ta.Compare(tb)
 	}
 
+	if cmp, ok := ta.Def().(CanCompare); ok {
+		return cmp.Compare(a, b)
+	}
+
 	panic(fmt.Sprintf("compare is not defined between `%s` and `%s`", ta, tb))
 }
