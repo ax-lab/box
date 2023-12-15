@@ -6,22 +6,19 @@ import (
 	"unicode/utf8"
 )
 
-func SourceString(name, text string) *Source {
-	return &Source{
-		Name: name,
-		Text: text,
-		tabW: 4,
-	}
-}
+const DefaultTabWidth = 4
 
 type Source struct {
 	Name string
 	Text string
-	tabW int
+	TabW int
 }
 
 func (src *Source) TabWidth() int {
-	return src.tabW
+	if src.TabW == 0 {
+		return DefaultTabWidth
+	}
+	return src.TabW
 }
 
 type Span struct {

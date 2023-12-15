@@ -23,13 +23,17 @@ func newSegment(seg *segment) Segment {
 }
 
 type NodeSet struct {
-	types    core.TypeMap
+	types    *core.TypeMap
 	bindings map[core.Value]*RangeTable
 	queue    nodeSetQueue
 }
 
+func newNodeSet(types *core.TypeMap) *NodeSet {
+	return &NodeSet{types: types}
+}
+
 func (set *NodeSet) Types() *core.TypeMap {
-	return &set.types
+	return set.types
 }
 
 func (set *NodeSet) Add(node *Node) {
@@ -67,8 +71,35 @@ func (set *NodeSet) Shift() Segment {
 	return Segment{}
 }
 
+type unboundSort struct {
+	keys  []core.Value
+	nodes [][]*Node
+}
+
+func (s unboundSort) Len() int {
+	return len(s.keys)
+}
+
+func (s unboundSort) Less(a, b int) bool {
+	return s.keys[a].Less(s.keys[b])
+}
+
+func (s unboundSort) Swap(a, b int) {
+	s.keys[a], s.keys[b] = s.keys[b], s.keys[a]
+	s.nodes[a], s.nodes[b] = s.nodes[b], s.nodes[a]
+}
+
 func (set *NodeSet) PopUnbound() (keys []core.Value, nodes [][]*Node) {
-	panic("TODO")
+	for k, v := range set.bindings {
+		keys = append(keys, k)
+		nodes = append(nodes, v.unbound)
+		v.unbound = nil
+	}
+
+	sortable := unboundSort{keys, nodes}
+	sort.Sort(sortable)
+
+	return
 }
 
 func (set *NodeSet) shiftEmpty() {

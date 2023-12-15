@@ -1,6 +1,8 @@
 package nodes
 
 import (
+	"slices"
+
 	"axlab.dev/byte/pkg/core"
 	"axlab.dev/util"
 )
@@ -32,12 +34,29 @@ func (ls *NodeList) Insert(index int, nodes ...*Node) {
 	ls.updateFrom(index)
 }
 
-func (ls *NodeList) Remove(index int) *Node {
+func (ls *NodeList) RemoveAt(index int) *Node {
 	node := ls.nodes[index]
 	ls.nodes = append(ls.nodes[:index], ls.nodes[index+1:]...)
 	ls.updateFrom(index)
 	node.list, node.index = nil, -1
 	return node
+}
+
+func (ls *NodeList) SplitBy(split func(node *Node) bool) (out []*NodeList) {
+	for i := ls.Len() - 1; i >= 0; i-- {
+		if split(ls.nodes[i]) {
+			if i < ls.Len()-1 {
+				out = append(out, ls.SplitAt(i+1))
+			}
+			ls.RemoveAt(i)
+		}
+	}
+
+	slices.Reverse(out)
+	if len(out) == 0 {
+		out = append(out, ls)
+	}
+	return out
 }
 
 func (ls *NodeList) SplitAt(index int) *NodeList {

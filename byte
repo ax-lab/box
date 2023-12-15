@@ -1,0 +1,3 @@
+#! /bin/bash
+
+go run ./go/byte/main.go "${@:1}"

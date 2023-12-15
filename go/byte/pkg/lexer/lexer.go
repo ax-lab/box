@@ -19,6 +19,16 @@ func New() *Lexer {
 	return &Lexer{}
 }
 
+func (lex *Lexer) Clone() *Lexer {
+	out := &Lexer{
+		Comment:   lex.Comment,
+		symbol_re: lex.symbol_re,
+	}
+	out.symbols = append(out.symbols, lex.symbols...)
+	out.matchers = append(out.matchers, lex.matchers...)
+	return out
+}
+
 func (lex *Lexer) MatchNumbers() {
 	lex.MatchRE(TokenNumber, `0[xX][_A-Za-z0-9]*`)
 	lex.MatchRE(TokenNumber, `[0-9][_0-9]*(\.[0-9][_0-9]*)?([eE][-+]?[0-9][_0-9]*)?[_A-Za-z0-9]*`)

@@ -44,3 +44,21 @@ func Text(input string) string {
 	}
 	return strings.Join(out, "\n")
 }
+
+func Indent(input string, prefix ...string) string {
+	tab := strings.Join(prefix, "")
+	if len(tab) == 0 {
+		tab = "    "
+	}
+
+	out := strings.Builder{}
+	for _, it := range Lines(input) {
+		if out.Len() > 0 {
+			out.WriteString("\n")
+		}
+		out.WriteString(tab)
+		out.WriteString(it)
+	}
+
+	return out.String()
+}
