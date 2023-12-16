@@ -6,9 +6,18 @@ import (
 )
 
 var (
+	_int = intType{"int", math.MinInt, math.MaxInt, castInt}
 	_i32 = intType{"i32", math.MinInt32, math.MaxInt32, castInt32}
 	_i64 = intType{"i64", math.MinInt64, math.MaxInt64, castInt64}
 )
+
+func (m *TypeMap) NewInt(val int) Value {
+	return NewValue(m.Int(), val)
+}
+
+func (m *TypeMap) Int() Type {
+	return m.Get(_int)
+}
 
 func (m *TypeMap) Int32() Type {
 	return m.Get(_i32)
@@ -35,14 +44,17 @@ func (t intType) Repr() string {
 
 func (t intType) InitType(typ Type) {
 	m := typ.Map()
-	i32 := m.Int32()
-	i64 := m.Int64()
+	var (
+		i00 = m.Int()
+		i32 = m.Int32()
+		i64 = m.Int64()
+	)
 
-	ints := []Type{i32, i64}
+	ints := []Type{i00, i32, i64}
 	for _, a := range ints {
 		for _, b := range ints {
 			m.AddCompare(a, b, func(a, b Value) int {
-				va, vb := a.AsInt(), b.AsInt()
+				va, vb := a.AsInt64(), b.AsInt64()
 				if va > vb {
 					return +1
 				} else if va < vb {
@@ -55,7 +67,11 @@ func (t intType) InitType(typ Type) {
 	}
 }
 
-func (v Value) AsInt() int64 {
+func (v Value) AsInt() int {
+	return int(v.AsInt64())
+}
+
+func (v Value) AsInt64() int64 {
 	switch v := v.Any().(type) {
 	case int:
 		return int64(v)
@@ -122,5 +138,6 @@ func (t intType) DisplayValue(v Value) string {
 	return fmt.Sprint(v.Any())
 }
 
+func castInt(v int64) any   { return int(v) }
 func castInt32(v int64) any { return int32(v) }
 func castInt64(v int64) any { return int64(v) }

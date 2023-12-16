@@ -2,14 +2,23 @@ package nodes
 
 import (
 	"container/heap"
+	"fmt"
 	"sort"
+	"strings"
 
 	"axlab.dev/byte/pkg/core"
 	"axlab.dev/byte/pkg/lexer"
 )
 
-type WithKey interface {
-	Key() core.Value
+func GetKey(v core.Value) (core.Value, bool) {
+	type withKey interface {
+		GetValueKey(v core.Value) core.Value
+	}
+
+	if t, ok := v.Type().Def().(withKey); ok {
+		return t.GetValueKey(v), true
+	}
+	return core.Value{}, false
 }
 
 type Segment struct {
@@ -21,6 +30,12 @@ type Segment struct {
 
 func newSegment(seg *segment) Segment {
 	return Segment{seg.list, seg.bind, seg.sta, seg.end}
+}
+
+func (seg *Segment) String() string {
+	out := strings.Builder{}
+	out.WriteString(fmt.Sprintf("Segment([%d..%d] %s #%s = %+v -- %+v)", seg.sta, seg.end, seg.bind.key.Debug(), seg.bind.ord.Debug(), seg.bind.val, seg.nodes))
+	return out.String()
 }
 
 type NodeSet struct {
@@ -44,10 +59,10 @@ func (set *NodeSet) Add(node *Node) {
 	}
 }
 
-func (set *NodeSet) Bind(span lexer.Span, key, val, ord core.Value) {
+func (set *NodeSet) Bind(span lexer.Span, key, ord core.Value, val any) {
 	if !key.IsZero() {
 		tb := set.getTable(key)
-		tb.Bind(span, key, val)
+		tb.Bind(span, key, ord, val)
 	}
 }
 
@@ -71,9 +86,11 @@ func (s unboundSort) Swap(a, b int) {
 
 func (set *NodeSet) PopUnbound() (keys []core.Value, nodes [][]*Node) {
 	for k, v := range set.bindings {
-		keys = append(keys, k)
-		nodes = append(nodes, v.unbound)
-		v.unbound = nil
+		if len(v.unbound) > 0 {
+			keys = append(keys, k)
+			nodes = append(nodes, v.unbound)
+			v.unbound = nil
+		}
 	}
 
 	sortable := unboundSort{keys, nodes}
@@ -114,6 +131,10 @@ func (q *nodeSetQueue) Len() int {
 func (q *nodeSetQueue) Less(i, j int) bool {
 	b0, b1 := q.segments[i].bind, q.segments[j].bind
 
+	if ord := b0.ord.Compare(b1.ord); ord != 0 {
+		return ord < 0
+	}
+
 	if key := b0.key.Compare(b1.key); key != 0 {
 		return key < 0
 	}
@@ -147,7 +168,7 @@ func (q *nodeSetQueue) Push(x any) {
 
 func (q *nodeSetQueue) Pop() any {
 	n := len(q.segments)
-	s := q.segments[n]
+	s := q.segments[n-1]
 	q.segments = q.segments[:n-1]
 	s.queue = -1
 	return s
@@ -179,7 +200,7 @@ type RangeTable struct {
 	unbound  []*Node
 }
 
-func (tb *RangeTable) Get(pos int) core.Value {
+func (tb *RangeTable) Get(pos int) any {
 	cnt := len(tb.segments)
 	idx := sort.Search(cnt, func(i int) bool {
 		return tb.segments[i].end > pos
@@ -187,15 +208,15 @@ func (tb *RangeTable) Get(pos int) core.Value {
 	if idx < cnt && pos >= tb.segments[idx].sta {
 		return tb.segments[idx].bind.val
 	}
-	return core.Value{}
+	return nil
 }
 
-func (tb *RangeTable) Bind(span lexer.Span, key, val core.Value) {
+func (tb *RangeTable) Bind(span lexer.Span, key, ord core.Value, val any) {
 	sta, end := span.Sta, span.End
 	if sta >= end {
 		return
 	}
-	bind := &binding{sta, end, span.Src, val, key}
+	bind := &binding{sta, end, span.Src, key, ord, val}
 	tb.addBinding(bind)
 }
 
@@ -231,8 +252,9 @@ type binding struct {
 	sta int
 	end int
 	src *lexer.Source
-	val core.Value
 	key core.Value
+	ord core.Value
+	val any
 }
 
 func (bind *binding) overrides(other *binding) bool {

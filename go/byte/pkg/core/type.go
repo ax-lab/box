@@ -31,6 +31,9 @@ type Type struct {
 }
 
 func (t Type) Def() IsType {
+	if t.data == nil {
+		return nil
+	}
 	return t.data.def
 }
 

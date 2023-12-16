@@ -21,14 +21,12 @@ func TestRangeTable(t *testing.T) {
 		tb.Add(node)
 	}
 
-	typ := core.TypeMap{}
-
 	src := &lexer.Source{}
 	set := func(sta, end int, val string) {
 		span := src.Span()
 		span.Sta = sta
 		span.End = end
-		tb.Bind(span, core.Value{}, core.NewValue(typ.Str(), val))
+		tb.Bind(span, core.Value{}, core.Value{}, val)
 	}
 
 	set(0, 5, "a")
@@ -41,7 +39,7 @@ func TestRangeTable(t *testing.T) {
 
 	check := func(expected any, sta, end int) {
 		for i := sta; i < end; i++ {
-			test.Equal(expected, tb.Get(i).Any())
+			test.Equal(expected, tb.Get(i))
 		}
 
 		found := [NODES]bool{}

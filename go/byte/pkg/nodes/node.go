@@ -136,11 +136,8 @@ func (node *Node) Prev() *Node {
 }
 
 func (node *Node) Key() core.Value {
-	if v, ok := node.val.Any().(WithKey); ok {
-		return v.Key()
-	} else {
-		return core.Value{}
-	}
+	key, _ := GetKey(node.val)
+	return key
 }
 
 func (node *Node) Span() lexer.Span {
@@ -156,5 +153,5 @@ func (node *Node) Value() core.Value {
 }
 
 func (node *Node) String() string {
-	return node.val.String()
+	return fmt.Sprintf("Node(%s)", node.val.String())
 }

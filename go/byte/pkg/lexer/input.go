@@ -48,6 +48,10 @@ func (src *Source) Span() Span {
 	}
 }
 
+func (span Span) IsZero() bool {
+	return span.Src == nil
+}
+
 func (span *Span) Text() string {
 	return span.Src.Text[span.Sta:span.End]
 }
@@ -122,22 +126,23 @@ func (span *Span) Advance(size int) {
 	}
 }
 
-type sourceType struct{}
+type typeOfSource struct{}
+type typeOfSourceKey struct{}
 
 func (src *Source) AsValue(typ *core.TypeMap) core.Value {
-	t := typ.Get(sourceType{})
+	t := typ.Get(typeOfSource{})
 	return core.NewValue(t, src)
 }
 
-func (t sourceType) Name() string {
+func (t typeOfSource) Name() string {
 	return "Source"
 }
 
-func (t sourceType) Repr() string {
+func (t typeOfSource) Repr() string {
 	return t.Name()
 }
 
-func (t sourceType) NewValue(typ core.Type, args ...any) (core.Type, any) {
+func (t typeOfSource) NewValue(typ core.Type, args ...any) (core.Type, any) {
 	if len(args) == 1 {
 		if v, ok := args[0].(*Source); ok {
 			return typ, v
@@ -146,6 +151,31 @@ func (t sourceType) NewValue(typ core.Type, args ...any) (core.Type, any) {
 	return core.InitError("invalid arguments", typ, args)
 }
 
-func (t sourceType) DisplayValue(v core.Value) string {
+func (t typeOfSource) DisplayValue(v core.Value) string {
 	return v.Any().(*Source).String()
+}
+
+func SourceKey(t *core.TypeMap) core.Value {
+	typ := t.Get(typeOfSourceKey{})
+	return core.NewValue(typ)
+}
+
+func (t typeOfSource) GetValueKey(v core.Value) core.Value {
+	return SourceKey(v.Type().Map())
+}
+
+func (t typeOfSourceKey) Name() string {
+	return "Key<Source>"
+}
+
+func (t typeOfSourceKey) Repr() string {
+	return t.Name()
+}
+
+func (t typeOfSourceKey) NewValue(typ core.Type, args ...any) (core.Type, any) {
+	return typ, nil
+}
+
+func (t typeOfSourceKey) Compare(a, b core.Value) int {
+	return 0
 }

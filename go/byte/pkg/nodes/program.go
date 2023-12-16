@@ -10,7 +10,25 @@ import (
 
 	"axlab.dev/byte/pkg/core"
 	"axlab.dev/byte/pkg/lexer"
+	"axlab.dev/util"
 )
+
+type Operator interface{}
+
+type Error struct {
+	Msg string
+	At  lexer.Span
+}
+
+func (e Error) String() string {
+	out := strings.Builder{}
+	if !e.At.IsZero() {
+		out.WriteString(e.At.Location())
+		out.WriteString(": ")
+	}
+	out.WriteString(util.Indented(e.Msg))
+	return out.String()
+}
 
 type Module struct {
 	lexer  *lexer.Lexer
@@ -26,8 +44,10 @@ func (mod *Module) Source() *lexer.Source {
 }
 
 type Program struct {
-	Debug DebugFlags
+	Debug  DebugFlags
+	Errors []Error
 
+	globals   map[core.Value]globalBind
 	lexer     lexer.Lexer
 	types     core.TypeMap
 	queue     nodeSetQueue
@@ -38,6 +58,11 @@ type Program struct {
 	sourcesRW sync.RWMutex
 	sources   map[string]sourceItem
 	modOrder  int
+}
+
+type globalBind struct {
+	ord core.Value
+	op  Operator
 }
 
 type DebugFlags struct {
@@ -59,6 +84,13 @@ func (prog *Program) SetTabWidth(tabWidth int) {
 
 func (prog *Program) Types() *core.TypeMap {
 	return &prog.types
+}
+
+func (prog *Program) Bind(key, ord core.Value, op Operator) {
+	if prog.globals == nil {
+		prog.globals = make(map[core.Value]globalBind)
+	}
+	prog.globals[key] = globalBind{ord, op}
 }
 
 func (prog *Program) LoadString(name, text string) *Module {
@@ -126,6 +158,12 @@ func (prog *Program) createModule(src *lexer.Source) *Module {
 		prog.modules = make(map[*lexer.Source]*Module)
 	}
 	prog.modules[src] = module
+
+	span := src.Span()
+	for key, it := range prog.globals {
+		module.nodes.Bind(span, key, it.ord, it.op)
+	}
+
 	return module
 }
 
@@ -163,8 +201,24 @@ func (prog *Program) Evaluate() {
 	}
 
 	for prog.queue.Len() > 0 {
-		_ = prog.queue.Shift()
-		panic("TODO")
+		segment := prog.queue.Shift()
+		panic(fmt.Sprintf("TODO: %s", segment.String()))
+	}
+
+	for _, mod := range modules {
+		if keys, vals := mod.nodes.PopUnbound(); len(keys) > 0 {
+			err := strings.Builder{}
+			err.WriteString(fmt.Sprintf("module `%s` has unprocessed nodes:\n", mod.source.Name))
+			for i, key := range keys {
+				nodes := vals[i]
+				err.WriteString(fmt.Sprintf("\n=> Key %s:\n", util.Indented(key.Debug())))
+				for _, it := range nodes {
+					err.WriteString(fmt.Sprintf("\n-> %s -- %s", util.Indented(it.String()), it.Span().Location()))
+				}
+			}
+
+			prog.Errors = append(prog.Errors, Error{Msg: err.String()})
+		}
 	}
 }
 
